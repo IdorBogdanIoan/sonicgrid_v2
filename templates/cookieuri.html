@@ -1,0 +1,86 @@
+{% extends "legal_base.html" %}
+{% block titlu %}Cookie-uri{% endblock %}
+{% block continut %}
+
+<h1>Politica de cookie-uri</h1>
+<div class="actualizat">Ultima actualizare: {{ L.ultima_actualizare }} · versiunea {{ L.TERMS_VERSION }}</div>
+
+<div class="caseta">
+  <p>
+    <b>Un singur cookie, strict necesar pentru autentificare.</b> Niciun cookie de
+    la terți, niciun analytics, niciun cookie de publicitate, nicio urmărire între
+    site-uri.
+  </p>
+</div>
+
+<h2>Cookie-ul folosit</h2>
+
+<table>
+  <tr><th>Nume</th><th>Rol</th><th>Durată</th><th>Tip</th></tr>
+  <tr>
+    <td><code>{{ L.cookie_nume }}</code></td>
+    <td>Ține minte că ești autentificat, ca să nu îți ceară parola la fiecare pagină.
+        Conține un identificator de sesiune semnat, nu parola și nu date despre tine.</td>
+    <td>{{ L.cookie_durata }}</td>
+    <td>Strict necesar</td>
+  </tr>
+</table>
+
+<h3>Cum e protejat</h3>
+
+<ul>
+  <li><code>HttpOnly</code> — nu poate fi citit de JavaScript, deci nu poate fi furat printr-un script injectat.</li>
+  <li><code>SameSite=Lax</code> — nu este trimis la cereri venite de pe alte site-uri.</li>
+  <li><code>Secure</code> — când sistemul rulează pe HTTPS, cookie-ul nu circulă niciodată necriptat.</li>
+</ul>
+
+<h2>De ce nu există banner de cookie-uri</h2>
+
+<p>
+  Legislația privind comunicațiile electronice (Directiva 2002/58/CE, transpusă în
+  România prin Legea 506/2004) cere consimțământ pentru cookie-uri, cu o excepție
+  explicită: cele <b>strict necesare</b> pentru furnizarea unui serviciu pe care
+  utilizatorul l-a cerut în mod expres.
+</p>
+
+<p>
+  Un cookie de sesiune care ține minte că te-ai autentificat intră exact în această
+  excepție. Fără el, autentificarea nu ar putea funcționa. De aceea nu ți se cere
+  acordul și nu există banner — nu pentru că l-am omis, ci pentru că nu e necesar.
+</p>
+
+<div class="caseta atentie">
+  <p>
+    Dacă în viitor se adaugă orice fel de analiză de trafic, hartă de căldură,
+    buton de rețea socială sau orice altă componentă de la un terț, situația se
+    schimbă complet: atunci va fi nevoie de un banner cu consimțământ prealabil,
+    iar acest document va trebui actualizat.
+  </p>
+</div>
+
+<h2>Alte tehnologii de stocare</h2>
+
+<p>
+  Aplicația nu folosește <code>localStorage</code>, <code>sessionStorage</code>,
+  IndexedDB, pixeli de urmărire sau amprentare a browserului.
+</p>
+
+<h2>Resurse externe</h2>
+
+<p>
+  Toate fișierele necesare interfeței — inclusiv biblioteca de hartă — sunt servite
+  de pe serverul propriu. Singura excepție este fundalul de hartă, cerut de browser
+  direct de la OpenStreetMap atunci când există conexiune la internet. Acele cereri
+  nu plasează cookie-uri, dar serverele OpenStreetMap pot vedea adresa IP a
+  browserului. Sistemul funcționează complet și fără acest fundal, caz în care nu
+  pleacă nicio cerere în afară.
+</p>
+
+<h2>Cum ștergi cookie-ul</h2>
+
+<p>
+  Te deconectezi din aplicație, sau ștergi cookie-urile pentru acest site din
+  setările browserului. Consecința e simplă: va trebui să te autentifici din nou.
+</p>
+
+{% endblock %}

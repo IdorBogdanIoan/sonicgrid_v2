@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SonicGrid</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --ground:  #0D1A1E;
+    --panel:   #14262C;
+    --edge:    #1F3A42;
+    --ink:     #DEEAEC;
+    --muted:   #7C949B;
+
+    --q0: #1B7F82;
+    --q1: #3FB6A8;
+    --q2: #E3B646;
+    --q3: #E4763C;
+    --q4: #D33049;
+
+    --alert:   #D33049;
+    --alert-bg: rgba(211, 48, 73, 0.14);
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--ui);
+    overflow: hidden;
+  }
+
+  /* ---------- bara de sus ---------- */
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 28px;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--edge);
+    transition: background-color .3s;
+  }
+
+  header.alerting { background: var(--alert-bg); border-bottom-color: var(--alert); }
+
+  .brand {
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .site { font-size: 13px; color: var(--muted); }
+
+  .stats { margin-left: auto; display: flex; gap: 26px; }
+
+  .stat { text-align: right; }
+
+  .stat b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 21px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat b.hot { color: var(--alert); }
+
+  .stat span {
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ---------- structura ---------- */
+
+  main { display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+
+  aside {
+    border-right: 1px solid var(--edge);
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #map { height: 100%; background: var(--panel); }
+
+  /* ---------- banner alerta ---------- */
+
+  .banner {
+    background: var(--alert-bg);
+    border: 1px solid var(--alert);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+
+  .banner-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--alert);
+  }
+
+  .banner-top .ago {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  .banner-nodes {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+    line-height: 1.6;
+  }
+
+  /* ---------- card nod ---------- */
+
+  .node {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 11px 13px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+
+  .node:hover, .node.sel { border-color: var(--q1); }
+
+  .node.off { opacity: 0.45; }
+
+  .node.alert { border-color: var(--alert); box-shadow: 0 0 0 1px var(--alert) inset; }
+
+  .node-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 9px;
+  }
+
+  .node-name { font-size: 13px; font-weight: 550; }
+
+  .badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--alert);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  .node-db {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex: none;
+  }
+
+  /* meter segmentat - ecoul bargraph-ului din monitorul serial */
+  .meter {
+    position: relative;
+    height: 13px;
+    border-radius: 3px;
+    background:
+      repeating-linear-gradient(90deg,
+        var(--edge) 0 4px, transparent 4px 6px);
+    overflow: hidden;
+  }
+
+  .meter-fill {
+    height: 100%;
+    width: 0;
+    transition: width .35s ease-out, background-color .35s;
+    -webkit-mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
+            mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
+  }
+
+  .meter-peak {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: var(--ink);
+    transition: left .35s ease-out;
+  }
+
+  .node-foot {
+    display: flex;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    overflow: hidden;
+    gap: 12px;
+    margin-top: 7px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+
+  /* ---------- sectiuni (grafic, istoric alerte) ---------- */
+
+  .chart {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 11px 13px;
+  }
+
+  .chart h3 {
+    margin: 0 0 8px;
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  canvas { width: 100%; height: 88px; display: block; }
+
+  .alert-row {
+    display: flex;
+    gap: 8px;
+    padding: 5px 0;
+    border-top: 1px solid var(--edge);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .alert-row:first-of-type { border-top: none; }
+  .alert-row .t { color: var(--muted); flex: none; }
+  .alert-row .c { color: var(--alert); flex: none; }
+  .alert-row .n { margin-left: auto; text-align: right; }
+
+  .empty {
+    padding: 22px 13px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ---------- markere harta ---------- */
+
+  .halo {
+    /* fara astea, SVG-ul scaleaza din coltul hartii si pulsul "fuge" de nod */
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pulse 2s ease-out infinite;
+  }
+
+  .halo-alert { animation-duration: .9s; }
+
+  @keyframes pulse {
+    0%   { transform: scale(1);   opacity: .55; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .halo { animation: none; opacity: .35; }
+  }
+
+  .leaflet-container { background: var(--panel); }
+
+  @media (max-width: 780px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 1fr 260px; }
+    aside { border-right: none; border-bottom: 1px solid var(--edge); }
+    .stats { gap: 14px; }
+  }
+  /* ---------- bare de clase ---------- */
+
+  .pbars { display: flex; flex-direction: column; gap: 6px; }
+
+  .pb {
+    display: grid;
+    grid-template-columns: 74px 1fr 34px;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pb-l {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pb-t {
+    position: relative;
+    height: 7px;
+    border-radius: 4px;
+    background: #0A1417;
+    overflow: hidden;
+  }
+
+  .pb-f {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0;
+    border-radius: 4px;
+    /* Culoarea tranziteaza, latimea NU: latimea o animam in JS cadru cu
+       cadru, iar o tranzitie CSS peste ea s-ar bate cap in cap cu animatia. */
+    transition: background-color .45s linear;
+  }
+
+  .pb-v {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: right;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Clasele care pot declansa o alarma au eticheta aprinsa. Celelalte doua
+     sunt doar informative, deci nu merita aceeasi greutate vizuala. */
+  .pb.urg .pb-l { color: var(--ink); }
+
+  /* Barele intregi numai pe nodul selectat. Vezi comentariul din updateCard:
+     altfel panoul are doua ecrane de bare si nu se mai vede harta. */
+  .node .node-bars { display: none; }
+  .node.sel .node-bars { display: flex; }
+
+  /* Clasa dominanta sta pe randul de sus, lipita de dreapta, chiar inainte de
+     nivelul in dB. In subsol se inghesuia: pe un nod cu baterie masurata erau
+     deja cinci campuri acolo si randul se rupea in doua. */
+  .f-cls {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* node-db avea margin-left:auto ca sa se impinga la dreapta. Acum f-cls face
+     imbrancirea, deci db-ul doar il urmeaza. */
+  .node-top .node-db { margin-left: 0; }
+
+  .node-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pbars.mini { margin-top: 8px; }
+  .pbars.mini .pb { grid-template-columns: 58px 1fr 28px; gap: 6px; }
+  .pbars.mini .pb-t { height: 5px; }
+  /* 11px, nu 10. La 10px perechea "cl" din Sticla se lipeste si cuvantul se
+     citeste "Stida". Verificat pe un ecran real, nu presupus. */
+  .pbars.mini .pb-l, .pbars.mini .pb-v { font-size: 11px; }
+  .pbars.mini .pb-l { letter-spacing: .01em; }
+
+  /* Citire veche: estompam, ca sa nu pari ca te uiti la ceva live cand te
+     uiti la ceva de acum trei minute. */
+  .stale { opacity: .42; transition: opacity .5s; }
+
+  .cage {
+    float: right;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  /* Cat a trecut din intervalul dintre doua heartbeat-uri. Umple de la stanga
+     la dreapta si se goleste cand soseste o citire noua, deci ochiul vede ca
+     sistemul lucreaza chiar si cand cifrele nu se schimba. */
+  .freshline {
+    height: 2px;
+    background: #0A1417;
+    border-radius: 2px;
+    margin: 8px 0 12px;
+    overflow: hidden;
+  }
+
+  .freshline i { display: block; height: 100%; width: 0; background: var(--q0); }
+
+</style>
+</head>
+<body>
+
+<header id="hdr">
+  <div class="brand">SonicGrid</div>
+  <div class="site">{{ site.name }}</div>
+  <div class="stats">
+    <div class="stat"><b id="s-online">–</b><span>noduri active</span></div>
+    <div class="stat"><b id="s-avg">–</b><span>nivel mediu</span></div>
+    <div class="stat"><b id="s-max">–</b><span>nivel maxim</span></div>
+    <div class="stat"><b id="s-alerts">–</b><span>alerte active</span></div>
+    <div class="stat"><b id="s-clock">–</b><span>ora</span></div>
+  </div>
+</header>
+
+<main>
+  <aside id="panel">
+    <div id="p-empty" class="empty" hidden>
+      Niciun nod nu trimite date.<br>
+      Verifica alimentarea nodurilor, gateway-ul ESP32 si serviciul
+      <b>sonicgrid-bridge</b> de pe Pi.
+    </div>
+    <div id="p-banner" class="banner" hidden></div>
+    <div id="p-classes" class="chart">
+      <h3>Ce se aude <span id="p-classes-age" class="cage"></span></h3>
+      <div class="freshline"><i id="p-fresh"></i></div>
+      <div id="p-cbars" class="pbars"></div>
+    </div>
+    <div id="p-nodes" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div id="p-chart" class="chart" hidden>
+      <h3 id="p-chart-title"></h3><canvas id="hist"></canvas>
+    </div>
+    <div id="p-alerts" class="chart"></div>
+  </aside>
+  <div id="map"></div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Valorile vin de la Flask (Jinja). Sunt puse intre ghilimele ca fisierul sa fie JS valid
+// si editorul sa nu le mai sublinieze ca erori.
+const SITE = JSON.parse('{{ site | tojson }}');
+const OFFLINE_AFTER = Number('{{ offline_after }}');
+const ALERT_ACTIVE = Number('{{ alert_active }}');
+
+// Numele si ordinea claselor vin de la server (PROC_NAMES din app.py), ca sa
+// nu fie scrise a treia oara aici. Lista din template e doar varianta de
+// rezerva pentru prima afisare, inainte sa raspunda /api/state.
+let CLASSES = JSON.parse('{{ class_names | tojson }}');
+let SCURT   = JSON.parse('{{ class_short | tojson }}');
+
+// Care clase pot declansa o alarma. Identic cu SG_LEG_URGENTE din main.c.
+// Grup si trafic se afiseaza, dar nu alarmeaza niciodata, deci nu merita
+// aceeasi greutate vizuala.
+const URGENTE = [true, true, true, true, false, false];
+
+// Cat de des cerem starea si alertele. Starea se schimba la fiecare
+// heartbeat, lista de alerte aproape niciodata, deci nu are rost acelasi ritm.
+const PAS_STARE_MS = 1000;
+const PAS_ALERTE_MS = 3000;
+
+// Constanta de timp a netezirii. Nodurile raporteaza o data pe minut, deci
+// fara netezire fiecare cifra sare brusc o data la 60 de secunde si restul
+// timpului pagina pare inghetata. Cu 220 ms, o schimbare aluneca in ~0.7 s.
+const TAU_MS = 220;
+
+let selected = null;
+let alertList = [];               // ultimele alerte, de la /api/alerts
+const markers = {};
+let alertLines = null;            // liniile dintre nodurile ultimei alerte
+
+// ---------- harta ----------
+
+const map = L.map('map', { zoomControl: false })
+  .setView([SITE.lat, SITE.lon], SITE.zoom || 18);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// ---------- rampa de culoare ----------
+
+function levelColor(level) {
+  if (level === null) return '#4A6068';
+  const stops = [
+    [0,   [27, 127, 130]],
+    [30,  [63, 182, 168]],
+    [50,  [227, 182, 70]],
+    [70,  [228, 118, 60]],
+    [90,  [211, 48, 73]]
+  ];
+  if (level <= stops[0][0]) return rgb(stops[0][1]);
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [a, ca] = stops[i], [b, cb] = stops[i + 1];
+    if (level <= b) {
+      const t = (level - a) / (b - a);
+      return rgb(ca.map((c, j) => Math.round(c + (cb[j] - c) * t)));
+    }
+  }
+  return rgb(stops[stops.length - 1][1]);
+}
+
+const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+// ---------- utilitare ----------
+
+const clampLevel = d => Math.max(0, Math.min(100, (d + 60) / 60 * 100));
+const esc = s => String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+const hhmmss = ts => new Date(ts * 1000).toLocaleTimeString('ro-RO',
+  { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+function ago(sec) {
+  if (sec < 60) return Math.round(sec) + ' s';
+  if (sec < 3600) return Math.round(sec / 60) + ' min';
+  return Math.round(sec / 3600) + ' h';
+}
+
+// ---------- randare panou ----------
+// Panoul NU se reconstruieste la fiecare secunda: fiecare card se creeaza o data
+// si apoi i se actualizeaza doar valorile. Asa nu mai palpaie, animatiile vumetrului
+// merg lin, iar graficul nu mai clipeste.
+
+// ---------- netezire ----------
+//
+// Fiecare element animat primeste o tinta, iar o bucla pe requestAnimationFrame
+// il duce acolo exponential. Asa afisarea e decuplata de sosirea datelor:
+// cererile pleaca o data pe secunda, desenarea merge la 60 de cadre.
+//
+// De ce nu tranzitii CSS pe latime: ar functiona, dar o tranzitie pornita din
+// nou inainte sa se termine cea precedenta sare, iar aici repornim de fiecare
+// data cand soseste o citire. Bucla de mai jos nu are discontinuitati.
+
+const animate = new Set();
+
+function aim(el, valoare, aplica) {
+  if (!el._anim) {
+    // Prima valoare se pune direct, fara animatie: la deschiderea paginii
+    // vrem cifrele acolo, nu crescand de la zero.
+    el._anim = { cur: valoare, tgt: valoare, aplica };
+    animate.add(el);
+    aplica(valoare);
+    return;
+  }
+  el._anim.tgt = valoare;
+  el._anim.aplica = aplica;
+}
+
+function uitaDe(el) {
+  for (const x of el.querySelectorAll('*')) { animate.delete(x); delete x._anim; }
+  animate.delete(el);
+  delete el._anim;
+}
+
+let tCadruAnterior = performance.now();
+
+function cadru(t) {
+  // Limitam dt: cand revii pe un tab lasat in fundal, t sare cu secunde, iar
+  // fara limita totul ar aparea instantaneu la valoarea finala.
+  const dt = Math.min(120, t - tCadruAnterior);
+  tCadruAnterior = t;
+  const k = 1 - Math.exp(-dt / TAU_MS);
+
+  for (const el of animate) {
+    const a = el._anim;
+    if (!a) { animate.delete(el); continue; }
+    const d = a.tgt - a.cur;
+    if (Math.abs(d) < 0.03) {
+      if (a.cur !== a.tgt) { a.cur = a.tgt; a.aplica(a.cur); }
+    } else {
+      a.cur += d * k;
+      a.aplica(a.cur);
+    }
+  }
+  requestAnimationFrame(cadru);
+}
+requestAnimationFrame(cadru);
+
+// ---------- bare de clase ----------
+
+// Culoarea unei bare de clasa.
+//
+// Clasele informative rama n reci oricat de sus ajung: trafic 95% intr-o
+// intersectie e normalitatea, iar daca ar fi rosu ai invata sa ignori rosul,
+// care e exact ce nu vrei de la un sistem de alarma. Numai clasele care pot
+// declansa o alarma urca pe gama de culori.
+// Paleta se citeste o data: getComputedStyle forteaza un recalcul de stil, si
+// n-are rost sa plateasca asta sase bare inmultit cu fiecare nod, la fiecare
+// secunda, pentru cinci valori care nu se schimba niciodata.
+const PALETA = (() => {
+  const st = getComputedStyle(document.documentElement);
+  const impl = ['#1B7F82', '#3FB6A8', '#E3B646', '#E4763C', '#D33049'];
+  return impl.map((d, k) => st.getPropertyValue('--q' + k).trim() || d);
+})();
+
+function procColor(v, urgent) {
+  if (!urgent) return PALETA[0];
+  if (v < 40) return PALETA[0];
+  if (v < 70) return PALETA[1];
+  if (v < 85) return PALETA[2];
+  if (v < 95) return PALETA[3];
+  return PALETA[4];
+}
+
+function makeBars(host, mini) {
+  host.innerHTML = CLASSES.map((nume, i) =>
+    `<div class="pb${URGENTE[i] ? ' urg' : ''}">` +
+      `<span class="pb-l" title="${esc(nume)}">${esc(SCURT[i] || nume)}</span>` +
+      `<span class="pb-t"><i class="pb-f"></i></span>` +
+      `<span class="pb-v">–</span>` +
+    `</div>`).join('');
+  if (mini) host.classList.add('mini');
+  return [...host.querySelectorAll('.pb')].map(r => ({
+    fill: r.querySelector('.pb-f'), val: r.querySelector('.pb-v')
+  }));
+}
+
+// proc = tablou de 6 procente, sau null cand nodul nu trimite procente
+// (firmware vechi). Null si [0,0,0,0,0,0] sunt lucruri diferite: primul e
+// "nu stiu", al doilea e liniste, deci le aratam diferit.
+function setBars(bars, proc) {
+  if (!bars) return;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    if (!proc) {
+      aim(b.fill, 0, v => { b.fill.style.width = v + '%'; });
+      b.val.textContent = '–';
+      continue;
+    }
+    const v = proc[i] || 0;
+    b.fill.style.background = procColor(v, URGENTE[i]);
+    aim(b.fill, v, x => { b.fill.style.width = x + '%'; });
+    aim(b.val, v, x => { b.val.textContent = Math.round(x) + '%'; });
+  }
+}
+
+let cbars = null;                 // barele globale, din bara laterala
+
+const cards = {};                 // node_id -> {el, dot, name, badge, db, fill, peak, id, rssi, batt, pk, age, bars}
+let lastHistory = 0;              // ultima incarcare a graficului (ms)
+let lastAlertsKey = '';
+
+function makeCard(n) {
+  const el = document.createElement('div');
+  el.className = 'node';
+  el.innerHTML = `
+    <div class="node-top">
+      <span class="dot"></span>
+      <span class="node-name"></span>
+      <span class="badge" hidden>alerta</span>
+      <span class="f-cls"></span>
+      <span class="node-db"></span>
+    </div>
+    <div class="meter">
+      <div class="meter-fill"></div>
+      <div class="meter-peak"></div>
+    </div>
+    <div class="node-foot">
+      <span class="f-id"></span><span class="f-rssi"></span><span class="f-batt"></span>
+      <span class="f-pk"></span>
+      <span class="f-age" style="margin-left:auto"></span>
+    </div>
+    <div class="pbars node-bars"></div>`;
+  el.onclick = () => selectNode(n.id);
+  const q = c => el.querySelector(c);
+  return {
+    el, dot: q('.dot'), name: q('.node-name'), badge: q('.badge'), db: q('.node-db'),
+    fill: q('.meter-fill'), peak: q('.meter-peak'), id: q('.f-id'), rssi: q('.f-rssi'),
+    batt: q('.f-batt'), pk: q('.f-pk'), age: q('.f-age'), cls: q('.f-cls'),
+    barsHost: q('.node-bars'), bars: makeBars(q('.node-bars'), true)
+  };
+}
+
+function updateCard(c, n) {
+  const color = levelColor(n.online ? n.level : null);
+  c.el.classList.toggle('off', !n.online);
+  c.el.classList.toggle('sel', n.id === selected);
+  c.el.classList.toggle('alert', !!n.alert);
+  c.dot.style.background = color;
+  c.name.textContent = n.name;
+  c.badge.hidden = !n.alert;
+  c.db.style.color = color;
+  if (n.online) {
+    aim(c.db, n.db, v => { c.db.textContent = v.toFixed(1) + ' dB'; });
+  } else {
+    delete c.db._anim; animate.delete(c.db);
+    c.db.textContent = 'offline';
+  }
+  aim(c.fill, n.online ? n.level : 0, v => { c.fill.style.width = v + '%'; });
+  c.fill.style.background = color;
+  c.peak.hidden = !n.online || n.peak_db === null;
+  if (n.peak_db !== null) {
+    aim(c.peak, clampLevel(n.peak_db), v => { c.peak.style.left = v + '%'; });
+  }
+  c.id.textContent = n.id;
+  c.rssi.textContent = n.rssi !== null && n.rssi !== undefined ? n.rssi + ' dBm' : '';
+  c.batt.textContent = n.batt_mv ? (n.batt_mv / 1000).toFixed(2) + ' V' : '';
+  c.pk.textContent = n.online ? 'peak ' + n.peak_db.toFixed(1) : '—';
+  c.age.textContent = n.age !== null ? ago(n.age) : '';
+
+  // Barele pe clasa ale nodului. Estompate cand citirea nu mai e proaspata:
+  // procentele alea sunt de acum doua minute, nu de acum.
+  setBars(c.bars, n.online ? n.proc : null);
+  c.barsHost.classList.toggle('stale', !n.fresh);
+
+  // Clasa dominanta, mereu vizibila in subsolul cardului. Cu sase bare pe
+  // fiecare din cinci noduri panoul ar fi de doua ecrane, deci barele intregi
+  // apar doar pe nodul pe care dai clic; restul timpului o singura linie
+  // spune ce aude nodul ala.
+  const dom = dominanta(n.online ? n.proc : null);
+  c.cls.textContent = dom ? `${SCURT[dom.i]} ${dom.v}%` : '';
+  c.cls.style.color = dom ? procColor(dom.v, URGENTE[dom.i]) : '';
+}
+
+// Clasa cu procentul cel mai mare, ignorand valorile neinteresante: sub 15%
+// toate clasele sunt zgomot si eticheta ar sari aiurea de la una la alta.
+function dominanta(proc) {
+  if (!proc) return null;
+  let i = -1;
+  for (let k = 0; k < proc.length; k++) {
+    if (proc[k] >= 15 && (i < 0 || proc[k] > proc[i])) i = k;
+  }
+  return i < 0 ? null : { i, v: proc[i] };
+}
+
+function selectNode(id) {
+  selected = id;
+  lastHistory = 0;                // graficul se reincarca imediat
+  refresh();
+}
+
+function render(data) {
+  const s = data.summary;
+  const now = data.server_time;
+
+  document.getElementById('s-online').textContent = `${s.online}/${s.total}`;
+  document.getElementById('s-avg').textContent = s.avg_level !== null ? s.avg_level + '%' : '–';
+  document.getElementById('s-max').textContent = s.max_level !== null ? s.max_level + '%' : '–';
+  const sa = document.getElementById('s-alerts');
+  sa.textContent = s.active_alerts;
+  sa.classList.toggle('hot', s.active_alerts > 0);
+  document.getElementById('hdr').classList.toggle('alerting', s.active_alerts > 0);
+  document.getElementById('s-clock').textContent =
+    new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // Numele claselor vin de la server. Daca s-au schimbat (alt model pe
+  // placa), reconstruim barele cu etichetele noi.
+  if (Array.isArray(data.class_names) &&
+      data.class_names.join('|') !== CLASSES.join('|')) {
+    CLASSES = data.class_names;
+    SCURT = data.class_short || data.class_names;
+    cbars = null;
+    for (const id in cards) { uitaDe(cards[id].el); cards[id].el.remove(); delete cards[id]; }
+  }
+  if (!cbars) cbars = makeBars(document.getElementById('p-cbars'), false);
+
+  // Barele globale: varful pe clasa peste nodurile proaspete.
+  setBars(cbars, s.proc_max);
+
+  // Cat de veche e cea mai recenta citire de la oricare nod. Asta conduce si
+  // linia de prospetime, si estomparea.
+  const varste = data.nodes.filter(n => n.age !== null).map(n => n.age);
+  const ultima = varste.length ? Math.min(...varste) : null;
+  const prag = data.fresh_for || 90;
+
+  document.getElementById('p-classes-age').textContent =
+    ultima === null ? 'nicio citire' : 'acum ' + ago(ultima);
+  document.getElementById('p-classes').classList.toggle(
+    'stale', ultima === null || ultima > prag);
+
+  // Linia se umple pe parcursul intervalului dintre doua citiri si se goleste
+  // cand soseste una noua. E singurul lucru din pagina care se misca vizibil
+  // intre doua heartbeat-uri, si de asta exista: altfel, cu date o data pe
+  // minut, nu ai de unde sti daca sistemul lucreaza sau a murit.
+  const fresh = document.getElementById('p-fresh');
+  aim(fresh, ultima === null ? 0 : Math.min(100, ultima / prag * 100),
+      v => { fresh.style.width = v + '%'; });
+
+  const byId = Object.fromEntries(data.nodes.map(n => [n.id, n]));
+  const none = s.online === 0;
+
+  // mesaj "niciun nod"
+  document.getElementById('p-empty').hidden = !none;
+
+  // banner pentru ultima alerta, cat timp e activa
+  const banner = document.getElementById('p-banner');
+  const la = s.latest_alert;
+  if (la && now - la.ts <= ALERT_ACTIVE) {
+    banner.hidden = false;
+    banner.innerHTML = `
+      <div class="banner-top">
+        <span>⚠ ${esc(la.cls_name)}</span>
+        <span class="ago">acum ${ago(now - la.ts)}</span>
+      </div>
+      <div class="banner-nodes">
+        ${la.nodes.map(n => `${esc(byId[n.node_id]?.name || n.node_id)}
+          · ${n.conf}% · ${n.db} dB · +${n.dt_ms} ms`).join('<br>')}
+      </div>`;
+  } else {
+    banner.hidden = true;
+  }
+
+  // carduri + markere (nodurile offline raman vizibile, estompate)
+  const list = document.getElementById('p-nodes');
+  const ids = new Set(data.nodes.map(n => n.id));
+  for (const id in cards) {
+    if (!ids.has(id)) {
+      // uitaDe scoate elementele din bucla de animatie. Fara asta, un nod
+      // dispărut ar lasa in Set elemente scoase din pagina, iar bucla ar
+      // continua sa le deseneze la nesfarsit.
+      uitaDe(cards[id].el);
+      cards[id].el.remove();
+      delete cards[id];
+    }
+  }
+  data.nodes.forEach(n => {
+    if (!cards[n.id]) cards[n.id] = makeCard(n);
+    updateCard(cards[n.id], n);
+    list.appendChild(cards[n.id].el);   // pastreaza ordinea; nu recreeaza elementul
+    drawMarker(n);
+  });
+
+  drawAlertLines(la, now, byId);
+
+  // grafic: il reincarcam la 5 s, nu la fiecare secunda
+  const chart = document.getElementById('p-chart');
+  chart.hidden = !selected;
+  if (selected) {
+    document.getElementById('p-chart-title').textContent = `Ultimele 5 minute — ${selected}`;
+    if (Date.now() - lastHistory > 5000) {
+      lastHistory = Date.now();
+      loadHistory(selected);
+    }
+  }
+
+  renderAlertHistory();
+}
+
+function renderAlertHistory() {
+  // rescriem lista doar cand s-a schimbat ceva
+  const key = alertList.map(a => a.id).join(',');
+  if (key === lastAlertsKey) return;
+  lastAlertsKey = key;
+
+  const box = document.getElementById('p-alerts');
+  if (!alertList.length) {
+    box.innerHTML = `<h3>Alerte</h3><div class="empty" style="padding:8px">Nicio alerta.</div>`;
+  } else {
+    box.innerHTML = `<h3>Ultimele alerte</h3>` + alertList.map(a => `
+      <div class="alert-row">
+        <span class="t">${hhmmss(a.ts)}</span>
+        <span class="c">${esc(a.cls_name)}</span>
+        <span class="n">${a.node_ids.map(esc).join(', ')}</span>
+      </div>`).join('');
+  }
+}
+
+// ---------- markere ----------
+
+function drawMarker(n) {
+  const color = levelColor(n.online ? n.level : null);
+  const radius = n.online ? 9 + n.level * 0.22 : 7;
+
+  if (!markers[n.id]) {
+    markers[n.id] = {
+      circle: L.circleMarker([n.lat, n.lon]).addTo(map),
+      halo: L.circleMarker([n.lat, n.lon], {
+        stroke: false, className: 'halo', interactive: false
+      }).addTo(map)
+    };
+  }
+
+  const m = markers[n.id];
+  m.circle.setStyle(n.alert
+    ? { color: '#D33049', weight: 4, fillColor: color, fillOpacity: 0.92 }
+    : { color: '#0D1A1E', weight: 2, fillColor: color, fillOpacity: 0.92 });
+  m.circle.setRadius(radius);
+  const tip = `<b>${esc(n.name)}</b>${n.alert ? ' · ALERTA' : ''}<br>` +
+    `${n.online ? n.db.toFixed(1) + ' dB · ' + n.level + '%' : 'offline'}`;
+  if (m.circle.getTooltip()) m.circle.setTooltipContent(tip);
+  else m.circle.bindTooltip(tip, { direction: 'top' });
+  m.circle.off('click').on('click', () => selectNode(n.id));
+
+  const haloEl = m.halo.getElement();
+  if (haloEl) haloEl.classList.toggle('halo-alert', !!n.alert);
+
+  if (n.alert) {
+    m.halo.setStyle({ fillColor: '#D33049', fillOpacity: 0.6 });
+    m.halo.setRadius(Math.max(radius, 14));
+  } else {
+    m.halo.setStyle({ fillColor: color, fillOpacity: n.online && n.level > 55 ? 0.5 : 0 });
+    m.halo.setRadius(radius);
+  }
+}
+
+// Leaga pe harta nodurile care au auzit acelasi sunet
+function drawAlertLines(alert, now, byId) {
+  if (alertLines) { map.removeLayer(alertLines); alertLines = null; }
+  if (!alert || now - alert.ts > ALERT_ACTIVE) return;
+
+  const pts = alert.node_ids
+    .map(id => byId[id])
+    .filter(Boolean)
+    .map(n => [n.lat, n.lon]);
+  if (pts.length < 2) return;
+
+  // fiecare nod cu fiecare, ca sa se vada zona acoperita
+  const segs = [];
+  for (let i = 0; i < pts.length; i++)
+    for (let j = i + 1; j < pts.length; j++)
+      segs.push([pts[i], pts[j]]);
+
+  alertLines = L.polyline(segs, {
+    color: '#D33049', weight: 2, opacity: 0.8, dashArray: '6 6', interactive: false
+  }).addTo(map);
+}
+
+// ---------- grafic ----------
+
+async function loadHistory(nodeId) {
+  const r = await fetch(`/api/history?node=${encodeURIComponent(nodeId)}&minutes=5`);
+  const { points } = await r.json();
+  const cv = document.getElementById('hist');
+  if (!cv) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr;
+  cv.height = cv.clientHeight * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const W = cv.clientWidth, H = cv.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  if (points.length < 2) {
+    ctx.fillStyle = '#7C949B';
+    ctx.font = '12px system-ui';
+    ctx.fillText('Se colecteaza date…', 8, H / 2);
+    return;
+  }
+
+  // linii de referinta la 25 / 50 / 75%
+  ctx.strokeStyle = '#1F3A42';
+  ctx.lineWidth = 1;
+  [25, 50, 75].forEach(p => {
+    const y = H - (p / 100) * H;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  });
+
+  const t0 = points[0].ts, t1 = points[points.length - 1].ts;
+  const span = Math.max(t1 - t0, 1);
+  const x = p => ((p.ts - t0) / span) * W;
+  const y = p => H - (p.level / 100) * H;
+
+  // alertele din fereastra, ca linii verticale rosii
+  ctx.strokeStyle = 'rgba(211,48,73,0.8)';
+  ctx.lineWidth = 1;
+  alertList
+    .filter(a => a.ts >= t0 && a.ts <= t1 && a.node_ids.includes(nodeId))
+    .forEach(a => {
+      const ax = ((a.ts - t0) / span) * W;
+      ctx.beginPath(); ctx.moveTo(ax, 0); ctx.lineTo(ax, H); ctx.stroke();
+    });
+
+  // umplere sub curba
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(63,182,168,0.28)');
+  grad.addColorStop(1, 'rgba(63,182,168,0.02)');
+  ctx.beginPath();
+  ctx.moveTo(x(points[0]), H);
+  points.forEach(p => ctx.lineTo(x(p), y(p)));
+  ctx.lineTo(x(points[points.length - 1]), H);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // curba
+  ctx.beginPath();
+  points.forEach((p, i) => i ? ctx.lineTo(x(p), y(p)) : ctx.moveTo(x(p), y(p)));
+  ctx.strokeStyle = '#3FB6A8';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+}
+
+// ---------- bucla ----------
+
+let tAlerte = 0;
+
+async function refresh() {
+  try {
+    // Alertele se cer mai rar decat starea: lista se schimba de cateva ori pe
+    // ora, starea la fiecare heartbeat. Pe un Pi care tine si Flask-ul si
+    // bridge-ul, doua cereri pe secunda in loc de patru se simt.
+    const acum = Date.now();
+    const cerAlerte = acum - tAlerte >= PAS_ALERTE_MS;
+    if (cerAlerte) tAlerte = acum;
+
+    const [st, al] = await Promise.all([
+      fetch('/api/state').then(r => r.json()),
+      cerAlerte ? fetch('/api/alerts?limit=10').then(r => r.json()) : null
+    ]);
+    if (al) alertList = al.alerts;
+    render(st);
+  } catch (e) {
+    document.getElementById('s-online').textContent = '!';
+  }
+}
+
+refresh();
+setInterval(refresh, PAS_STARE_MS);
+</script>
+</body>
+</html>

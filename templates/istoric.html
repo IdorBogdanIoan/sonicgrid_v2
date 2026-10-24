@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SonicGrid - istoric</title>
+<style>
+  /* Aceeasi paleta ca dashboard-ul. Daca schimbi culorile intr-un loc,
+     schimba-le in amandoua, altfel cele doua pagini arata a doua produse. */
+  :root {
+    --ground:  #0D1A1E;
+    --panel:   #14262C;
+    --edge:    #1F3A42;
+    --ink:     #DEEAEC;
+    --muted:   #7C949B;
+    --q0: #1B7F82;  --q1: #3FB6A8;  --q2: #E3B646;
+    --q3: #E4763C;  --q4: #D33049;
+    --alert: #D33049;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--ground); color: var(--ink);
+    font-family: var(--ui); font-size: 14px;
+  }
+  a { color: var(--q1); }
+
+  header {
+    display: flex; align-items: baseline; gap: 22px;
+    padding: 14px 22px; border-bottom: 1px solid var(--edge);
+    position: sticky; top: 0; background: var(--ground); z-index: 10;
+  }
+  .brand { font-size: 15px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
+  .site { font-size: 13px; color: var(--muted); }
+  nav { display: flex; gap: 14px; margin-left: 10px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding-bottom: 2px; }
+  nav a.on { color: var(--ink); border-bottom: 2px solid var(--q1); }
+  .cine { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .cine b { color: var(--ink); font-weight: 600; }
+  .rol {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+    letter-spacing: .08em; padding: 2px 6px; border-radius: 3px;
+    border: 1px solid var(--edge); margin-left: 6px;
+  }
+  .rol.admin { border-color: var(--q2); color: var(--q2); }
+
+  main { padding: 18px 22px 60px; max-width: 1400px; }
+
+  /* ---------- filtre ---------- */
+
+  .filtre {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 12px 14px; margin-bottom: 18px;
+  }
+  .grup { display: flex; gap: 0; }
+  .grup button {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--edge); border-right: none;
+    padding: 6px 12px; cursor: pointer; font-family: var(--mono); font-size: 12px;
+  }
+  .grup button:first-child { border-radius: 4px 0 0 4px; }
+  .grup button:last-child { border-right: 1px solid var(--edge); border-radius: 0 4px 4px 0; }
+  .grup button.on { background: var(--q0); color: #fff; border-color: var(--q0); }
+  .grup button:hover:not(.on) { color: var(--ink); }
+
+  select {
+    background: var(--ground); color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 4px;
+    padding: 6px 10px; font-family: var(--ui); font-size: 13px;
+  }
+  label.camp { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+
+  .desc { margin-left: auto; display: flex; gap: 8px; }
+  .buton {
+    background: transparent; color: var(--q1);
+    border: 1px solid var(--q0); border-radius: 4px;
+    padding: 6px 12px; cursor: pointer; font-size: 12px; text-decoration: none;
+    display: inline-block;
+  }
+  .buton:hover { background: var(--q0); color: #fff; }
+
+  /* ---------- sectiuni ---------- */
+
+  section {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 16px 18px; margin-bottom: 18px;
+  }
+  section h2 {
+    margin: 0 0 4px; font-size: 11px; font-weight: 650;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  }
+  .sub { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-size: 10px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em;
+    padding: 6px 10px 6px 0; border-bottom: 1px solid var(--edge);
+  }
+  td { padding: 7px 10px 7px 0; border-bottom: 1px solid rgba(31,58,66,.5); }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .gol { color: var(--muted); padding: 18px 0; font-size: 13px; }
+
+  .pastila {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 3px;
+    background: rgba(211,48,73,.16); color: var(--alert);
+  }
+  .pastila.calm { background: rgba(27,127,130,.18); color: var(--q1); }
+
+  .punct { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 7px; }
+
+  canvas { width: 100%; height: 220px; display: block; }
+
+  .bara-mica {
+    display: inline-block; width: 60px; height: 5px; border-radius: 3px;
+    background: #0A1417; overflow: hidden; vertical-align: middle; margin-right: 8px;
+  }
+  .bara-mica i { display: block; height: 100%; background: var(--q1); }
+
+  .doar-admin { display: {{ 'block' if este_admin else 'none' }}; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">SonicGrid</div>
+  <div class="site">{{ site.name }}</div>
+  <nav>
+    <a href="/">Hartă</a>
+    <a href="/istoric" class="on">Istoric</a>
+  </nav>
+  <div class="cine">
+    <b>{{ current_user }}</b><span class="rol {{ current_rol }}">{{ current_rol }}</span>
+    &nbsp; <a href="/logout">ieșire</a>
+  </div>
+</header>
+
+<main>
+
+  <div class="filtre">
+    <div class="grup" id="perioada">
+      <button data-ore="1">1 oră</button>
+      <button data-ore="24" class="on">24 ore</button>
+      <button data-ore="168">7 zile</button>
+      <button data-ore="720">30 zile</button>
+    </div>
+
+    <label class="camp">clasă
+      <select id="f-clasa">
+        <option value="toate">toate</option>
+        {% for n in class_names %}<option value="{{ loop.index }}">{{ n }}</option>{% endfor %}
+      </select>
+    </label>
+
+    <label class="camp">nod
+      <select id="f-nod">
+        <option value="">toate</option>
+        {% for n in noduri %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+      </select>
+    </label>
+
+    <div class="desc">
+      <a class="buton" id="csv-alerte">CSV alerte</a>
+      <a class="buton" id="csv-citiri">CSV citiri</a>
+    </div>
+  </div>
+
+  <section>
+    <h2>Alerte</h2>
+    <p class="sub" id="alerte-sub">se încarcă</p>
+    <table>
+      <thead><tr>
+        <th style="width:150px">Când</th>
+        <th style="width:150px">Clasă</th>
+        <th>Noduri</th>
+        <th style="width:110px">Încredere</th>
+        <th style="width:110px">Confirmare</th>
+      </tr></thead>
+      <tbody id="alerte"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Nivel pe nod</h2>
+    <p class="sub" id="nivel-sub">alege un nod din filtrul de sus</p>
+    <canvas id="grafic"></canvas>
+  </section>
+
+  <section>
+    <h2>Starea rețelei</h2>
+    <p class="sub" id="retea-sub">ultima oră</p>
+    <table>
+      <thead><tr>
+        <th>Nod</th>
+        <th style="width:110px">Stare</th>
+        <th style="width:150px">Livrare</th>
+        <th style="width:100px">Nivel</th>
+        <th style="width:90px">Semnal</th>
+        <th style="width:90px">Baterie</th>
+        <th style="width:110px">Ultima oară</th>
+      </tr></thead>
+      <tbody id="retea"></tbody>
+    </table>
+  </section>
+
+  <section class="doar-admin">
+    <h2>Utilizatori</h2>
+    <p class="sub">Conturile se creează din linia de comandă pe Pi:
+      <code>python -m sonicgrid_web add nume rol</code></p>
+    <table>
+      <thead><tr>
+        <th>Utilizator</th><th style="width:120px">Rol</th>
+        <th style="width:190px">Ultimul login</th><th style="width:190px">Termeni acceptați</th>
+      </tr></thead>
+      <tbody id="utilizatori"></tbody>
+    </table>
+  </section>
+
+  <section class="doar-admin">
+    <h2>Sistem</h2>
+    <p class="sub" id="sistem">se încarcă</p>
+  </section>
+
+</main>
+
+<script>
+"use strict";
+
+const CLASE      = JSON.parse('{{ class_names | tojson }}');
+const SCURT      = JSON.parse('{{ class_short | tojson }}');
+const ESTE_ADMIN = {{ 'true' if este_admin else 'false' }};
+const MAX_ZILE   = Number('{{ istoric_max_zile }}');
+
+let ore   = 24;
+let clasa = "toate";
+let nod   = "";
+
+const esc = s => String(s).replace(/[<>&"]/g, c =>
+  ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
+
+const ceas = ts => new Date(ts * 1000).toLocaleString('ro-RO',
+  { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+function cand(ts) {
+  const d = (Date.now() / 1000) - ts;
+  if (d < 60)    return Math.round(d) + ' s';
+  if (d < 3600)  return Math.round(d / 60) + ' min';
+  if (d < 86400) return Math.round(d / 3600) + ' h';
+  return Math.round(d / 86400) + ' z';
+}
+
+// Culoarea pentru LIVRARE, si e inversata fata de cea de nivel de pe harta.
+//
+// Pe harta, rosu inseamna "tare", deci ingrijorator. Aici 100% livrare e
+// lucrul BUN. Daca as fi refolosit aceeasi rampa, un nod perfect sanatos ar fi
+// aparut rosu aprins, adica exact pe dos. Scara e deci: putin = rosu, mult =
+// verde, si nu imprumuta nimic de la cealalta.
+function culoareLivrare(pct) {
+  const v = document.documentElement;
+  const q = k => getComputedStyle(v).getPropertyValue('--q' + k).trim();
+  if (pct == null) return getComputedStyle(v).getPropertyValue('--muted').trim();
+  if (pct < 25) return q(4);
+  if (pct < 50) return q(3);
+  if (pct < 75) return q(2);
+  return q(1);
+}
+
+// Care clase pot declansa o alarma. Identic cu SG_LEG_URGENTE din firmware si
+// cu URGENTE din dashboard. Indicii sunt 1..6 aici, fiindca pe fir clasa 0
+// inseamna "nedeterminat".
+const URGENTE_CLS = new Set([1, 2, 3, 4]);
+
+function qs() {
+  const p = new URLSearchParams({ ore: String(ore) });
+  if (clasa !== "toate") p.set("cls", clasa);
+  if (nod) p.set("nod", nod);
+  return p.toString();
+}
+
+// ---------- alerte ----------
+
+async function incarcaAlerte() {
+  const sub = document.getElementById('alerte-sub');
+  const t   = document.getElementById('alerte');
+  try {
+    const d = await (await fetch('/api/istoric/alerte?' + qs() + '&limita=200')).json();
+    if (!d.alerte.length) {
+      t.innerHTML = '<tr><td colspan="5" class="gol">Nicio alertă în intervalul ales.</td></tr>';
+      sub.textContent = 'nicio alertă';
+      return;
+    }
+    t.innerHTML = d.alerte.map(a => {
+      const conf = Math.max(...a.nodes.map(n => n.conf || 0));
+      const confirmat = a.nodes.length >= 2;
+      // Culoarea pastilei spune CE clasa e, nu daca a fost confirmata.
+      // Confirmarea are deja coloana ei. Daca as colora dupa confirmare, un
+      // "Tipat" auzit de un singur nod ar arata calm, ceea ce e fix pe dos.
+      const urgent = URGENTE_CLS.has(a.cls);
+      return `<tr>
+        <td class="num">${esc(ceas(a.ts))}</td>
+        <td><span class="pastila ${urgent ? '' : 'calm'}">${esc(a.cls_name)}</span></td>
+        <td class="num">${a.nodes.map(n => esc(n.node_id) + ' ' + n.db + ' dB').join(' &nbsp; ')}</td>
+        <td class="num">${conf}%</td>
+        <td>${confirmat ? a.nodes.length + ' noduri' : '<span style="color:var(--muted)">un nod</span>'}</td>
+      </tr>`;
+    }).join('');
+    sub.textContent = `${d.alerte.length} alerte`
+      + (d.alerte.length >= 200 ? ', afișate cele mai recente 200' : '');
+  } catch (e) {
+    sub.textContent = 'nu am putut încărca alertele';
+  }
+}
+
+// ---------- grafic de nivel ----------
+
+let puncte = [];
+
+// Graficul poate arata un singur nod. Cand filtrul e pe "toate", alegem noi
+// unul in loc sa lasam un panou gol: cel cu cele mai multe citiri in fereastra,
+// adica nodul despre care chiar avem ceva de aratat. Subtitlul spune clar ca
+// alegerea e a noastra, ca sa nu para ca e singurul nod care exista.
+async function incarcaNivel() {
+  const sub = document.getElementById('nivel-sub');
+  let tinta = nod, ales = false;
+
+  if (!tinta) {
+    try {
+      const r = await (await fetch('/api/retea')).json();
+      const cu = r.noduri.filter(n => n.citiri_ora > 0)
+                         .sort((a, b) => b.citiri_ora - a.citiri_ora);
+      if (cu.length) { tinta = cu[0].id; ales = true; }
+    } catch (e) { /* mergem mai departe fara */ }
+  }
+
+  if (!tinta) {
+    puncte = []; deseneaza();
+    sub.textContent = 'niciun nod cu date în intervalul ales';
+    return;
+  }
+
+  try {
+    const d = await (await fetch(`/api/istoric/nivel?nod=${encodeURIComponent(tinta)}&ore=${ore}`)).json();
+    puncte = d.puncte;
+    const cate = d.total > d.puncte.length
+      ? `${d.puncte.length} puncte din ${d.total}, unul la fiecare ${d.pas}`
+      : `${d.puncte.length} puncte`;
+    sub.textContent = ales
+      ? `${tinta}, ales automat ca nodul cu cele mai multe citiri. ${cate}`
+      : `${tinta}. ${cate}`;
+    deseneaza();
+  } catch (e) {
+    sub.textContent = 'nu am putut încărca seria';
+  }
+}
+
+function deseneaza() {
+  const c = document.getElementById('grafic');
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  c.width = w * dpr; c.height = h * dpr;
+  const x = c.getContext('2d');
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.clearRect(0, 0, w, h);
+
+  if (puncte.length < 2) {
+    x.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    x.font = '13px system-ui';
+    x.fillText('fără date în intervalul ales', 10, h / 2);
+    return;
+  }
+
+  // Domeniul pe verticala: fix -90..0 dBFS, nu auto-scalat. Auto-scalarea ar
+  // face zgomotul de fond sa arate ca un eveniment, fiindca ocupa toata
+  // inaltimea. Cu axa fixa, inaltimea inseamna mereu acelasi lucru.
+  const DB_MIN = -90, DB_MAX = 0;
+  const padL = 42, padB = 22, padT = 10, padR = 8;
+  const t0 = puncte[0].ts, t1 = puncte[puncte.length - 1].ts;
+  const px = t => padL + (t - t0) / Math.max(1, t1 - t0) * (w - padL - padR);
+  const py = v => padT + (DB_MAX - Math.max(DB_MIN, Math.min(DB_MAX, v)))
+                        / (DB_MAX - DB_MIN) * (h - padT - padB);
+
+  const edge = getComputedStyle(document.documentElement).getPropertyValue('--edge').trim();
+  const mut  = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+
+  x.strokeStyle = edge; x.lineWidth = 1;
+  x.fillStyle = mut; x.font = '10px ' + getComputedStyle(document.documentElement).getPropertyValue('--mono');
+  for (let v = DB_MIN; v <= DB_MAX; v += 30) {
+    const y = py(v) + 0.5;
+    x.beginPath(); x.moveTo(padL, y); x.lineTo(w - padR, y); x.stroke();
+    x.fillText(v + ' dB', 4, y + 3);
+  }
+
+  x.beginPath();
+  puncte.forEach((p, i) => { const fn = i ? 'lineTo' : 'moveTo'; x[fn](px(p.ts), py(p.db)); });
+  x.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--q1').trim();
+  x.lineWidth = 1.6;
+  x.stroke();
+
+  x.fillStyle = mut;
+  x.font = '10px ' + getComputedStyle(document.documentElement).getPropertyValue('--mono');
+  x.fillText(ceas(t0), padL, h - 6);
+  const et = ceas(t1);
+  x.fillText(et, w - padR - x.measureText(et).width, h - 6);
+}
+
+window.addEventListener('resize', deseneaza);
+
+// ---------- starea retelei ----------
+
+async function incarcaRetea() {
+  const t = document.getElementById('retea');
+  try {
+    const d = await (await fetch('/api/retea')).json();
+    document.getElementById('retea-sub').textContent =
+      `ultima oră, față de ${d.asteptate} heartbeat-uri așteptate`;
+    t.innerHTML = d.noduri.map(n => {
+      const liv = Math.min(100, n.livrare_pct);
+      return `<tr>
+        <td><span class="punct" style="background:${n.online ? 'var(--q1)' : 'var(--muted)'}"></span>${esc(n.id)}
+            <span style="color:var(--muted)"> ${esc(n.name)}</span></td>
+        <td>${n.online ? 'online' : '<span style="color:var(--muted)">offline</span>'}</td>
+        <td class="num"><span class="bara-mica"><i style="width:${liv}%;background:${culoareLivrare(liv)}"></i></span>${n.livrare_pct}%</td>
+        <td class="num">${n.db == null ? '–' : n.db + ' dB'}</td>
+        <td class="num">${n.rssi == null ? '–' : n.rssi + ' dBm'}</td>
+        <td class="num">${n.batt_mv ? (n.batt_mv / 1000).toFixed(2) + ' V' : '–'}</td>
+        <td class="num">${n.age == null ? '–' : cand(d.server_time - n.age)}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    t.innerHTML = '<tr><td colspan="7" class="gol">Nu am putut încărca starea rețelei.</td></tr>';
+  }
+}
+
+// ---------- administrare ----------
+
+async function incarcaAdmin() {
+  if (!ESTE_ADMIN) return;
+  try {
+    const u = await (await fetch('/api/utilizatori')).json();
+    document.getElementById('utilizatori').innerHTML = u.utilizatori.map(x => `<tr>
+        <td>${esc(x.nume)}</td>
+        <td><span class="rol ${esc(x.rol)}">${esc(x.rol)}</span></td>
+        <td class="num">${x.ultim_login ? esc(x.ultim_login.replace('T', ' ')) : '–'}</td>
+        <td class="num">${x.termeni_acceptati ? esc(x.termeni_acceptati.replace('T', ' ')) : '–'}</td>
+      </tr>`).join('');
+
+    const s = await (await fetch('/api/sistem')).json();
+    const mb = s.baza_octeti == null ? '?' : (s.baza_octeti / 1048576).toFixed(1);
+    const dz = (s.primul && s.ultimul)
+      ? Math.max(1, Math.round((s.ultimul - s.primul) / 86400)) : 0;
+    document.getElementById('sistem').textContent =
+      `${s.citiri.toLocaleString('ro-RO')} citiri și ${s.alerte} alerte, ` +
+      `acoperind ${dz} ${dz === 1 ? 'zi' : 'zile'}. Baza are ${mb} MB, la ${s.baza_cale}. ` +
+      `Istoricul se poate interoga cel mult ${MAX_ZILE} de zile în urmă.`;
+  } catch (e) { /* operatorul nu ajunge aici */ }
+}
+
+// ---------- legaturi ----------
+
+function linkuriCsv() {
+  document.getElementById('csv-alerte').href = '/api/export.csv?ce=alerte&' + qs();
+  document.getElementById('csv-citiri').href = '/api/export.csv?ce=citiri&' + qs();
+}
+
+function reincarca() {
+  linkuriCsv();
+  incarcaAlerte();
+  incarcaNivel();
+}
+
+document.querySelectorAll('#perioada button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('#perioada button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    ore = Number(b.dataset.ore);
+    reincarca();
+  };
+});
+document.getElementById('f-clasa').onchange = e => { clasa = e.target.value; reincarca(); };
+document.getElementById('f-nod').onchange   = e => { nod   = e.target.value; reincarca(); };
+
+reincarca();
+incarcaRetea();
+incarcaAdmin();
+
+// Starea retelei se improspateaza singura; alertele si graficul nu, ca sa nu
+// se schimbe sub degetul cuiva care tocmai citeste o linie.
+setInterval(incarcaRetea, 30000);
+</script>
+</body>
+</html>

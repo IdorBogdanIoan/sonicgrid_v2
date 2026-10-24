@@ -1,0 +1,53 @@
+{% extends "web/base.html" %}
+{% block title %}Politica de confidențialitate · SonicGrid{% endblock %}
+{% block content %}
+<article class="doc">
+<h1>Politica de confidențialitate</h1>
+<p class="meta">Versiunea {{ legal.TERMS_VERSION }} · ultima actualizare: {{ legal.last_updated }}</p>
+
+<p>Această politică explică ce date prelucrează {{ legal.project }}, de ce și ce drepturi ai, conform Regulamentului (UE) 2016/679 (GDPR) și Legii nr. 190/2018.</p>
+
+<h2>1. Operatorul</h2>
+<p>{{ legal.operator }}, {{ legal.operator_address }}. Contact proiect: <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a>. Responsabilul cu protecția datelor: <a href="mailto:{{ legal.dpo_email }}">{{ legal.dpo_email }}</a>.</p>
+
+<h2>2. Ce face sistemul (și ce nu face)</h2>
+<p>Senzorii {{ legal.project }} din {{ legal.location }} măsoară nivelul sonor și detectează automat sunete de tip țipăt, pentru cercetare în domeniul siguranței.</p>
+<ul>
+<li><strong>Nu înregistrăm continuu și nu ascultăm conversații.</strong> În mod normal senzorii trimit doar nivelul sonor și dacă au detectat un sunet de tip țipăt.</li>
+{% if legal.keyword_spotting %}
+<li><strong>Fragmente audio scurte la alertă.</strong> Doar când un senzor detectează un sunet suspect, trimite serverului un fragment audio de câteva secunde. Serverul verifică automat dacă fragmentul conține unul dintre câteva cuvinte de ajutor (de exemplu „ajutor”, „help”). Nu se face transcriere completă, iar fragmentele fără astfel de cuvinte sunt șterse imediat.</li>
+{% endif %}
+{% if legal.stores_audio_clips %}
+<li><strong>Păstrarea fragmentelor.</strong> Fragmentele în care s-a detectat un cuvânt de ajutor se păstrează {{ legal.retention_audio_days }} zile, pentru verificarea alertei de către echipă, apoi se șterg.</li>
+{% endif %}
+<li><strong>Nu folosim camere</strong> și nu facem identificarea persoanelor după voce.</li>
+</ul>
+
+<h2>3. Ce date prelucrăm</h2>
+<table>
+<tr><th>Categorie</th><th>Date</th><th>Scop</th><th>Temei legal</th><th>Păstrare</th></tr>
+<tr><td>Utilizatori ai platformei</td><td>nume de utilizator, parolă (doar hash criptografic), data acceptării termenilor, data ultimei autentificări</td><td>acces securizat la platformă</td><td>art. 6 alin. (1) lit. b) și f) GDPR</td><td>cât timp contul este activ</td></tr>
+<tr><td>Jurnale de securitate</td><td>adresa IP, ora, rezultatul autentificării</td><td>prevenirea accesului neautorizat</td><td>art. 6 alin. (1) lit. f) GDPR — interes legitim (securitate)</td><td>{{ legal.retention_logs_days }} zile</td></tr>
+{% if legal.keyword_spotting %}<tr><td>Fragmente audio la alertă</td><td>câteva secunde de sunet, care pot conține voci</td><td>verificarea alertelor de siguranță</td><td>art. 6 alin. (1) lit. e) sau f) GDPR — [de confirmat cu DPO-ul]</td><td>{% if legal.stores_audio_clips %}{{ legal.retention_audio_days }} zile dacă s-a detectat un cuvânt de ajutor; altfel șterse imediat{% else %}nu se păstrează{% endif %}</td></tr>{% endif %}
+<tr><td>Date acustice</td><td>niveluri sonore și alerte (senzor, oră, nivel)</td><td>cercetare științifică, siguranță</td><td>art. 6 alin. (1) lit. e) sau f) GDPR — [de confirmat cu DPO-ul universității]</td><td>{{ legal.retention_events_days }} zile, apoi agregate/anonimizate</td></tr>
+</table>
+
+<h2>4. Cookie-uri</h2>
+<p>Folosim un singur cookie, <code>sg_session</code>, strict necesar pentru a te menține autentificat. Expiră după 8 ore sau la deconectare. Nu folosim cookie-uri de analiză, publicitate sau ale terților, deci nu este necesar un banner de consimțământ.</p>
+
+<h2>5. Cine are acces la date</h2>
+<p>Doar echipa proiectului și coordonatorul, prin conturi personale. Datele sunt stocate pe un server local (Raspberry Pi) aflat în controlul echipei și nu sunt vândute, închiriate sau transmise terților, cu excepția situațiilor impuse de lege (de exemplu, la cererea autorităților). Nu transferăm date în afara Spațiului Economic European.</p>
+
+<h2>6. Securitate</h2>
+<p>Parolele sunt stocate doar sub formă de hash, sesiunile sunt protejate împotriva atacurilor CSRF și de tip session fixation, încercările repetate de autentificare sunt blocate temporar, iar accesul la server este restricționat. Nicio măsură nu garantează securitate absolută; în caz de incident vom proceda conform art. 33–34 GDPR.</p>
+
+<h2>7. Drepturile tale</h2>
+<p>Ai dreptul de acces, rectificare, ștergere, restricționare, portabilitate și opoziție (art. 15–21 GDPR), precum și dreptul de a-ți retrage consimțământul, acolo unde acesta este temeiul. Scrie-ne la <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a>; răspundem în cel mult o lună. Ai dreptul să depui plângere la <a href="https://www.dataprotection.ro" target="_blank" rel="noopener">Autoritatea Națională de Supraveghere a Prelucrării Datelor cu Caracter Personal (ANSPDCP)</a>.</p>
+
+<h2>8. Decizii automate</h2>
+<p>Alertele sunt generate automat, dar nu produc efecte juridice asupra nimănui și sunt verificate de o persoană înainte de orice acțiune. Nu facem profilare.</p>
+
+<h2>9. Modificări</h2>
+<p>La modificări importante actualizăm versiunea de mai sus și îți cerem să accepți din nou la următoarea autentificare.</p>
+</article>
+{% endblock %}

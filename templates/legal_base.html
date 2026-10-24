@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titlu %}{% endblock %} — SonicGrid</title>
+<style>
+  :root {
+    --ground: #0D1A1E; --panel: #14262C; --edge: #1F3A42;
+    --ink: #DEEAEC; --muted: #7C949B;
+    --accent: #3FB6A8; --warn: #E3B646; --alert: #D33049;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--ui); font-size: 15px; line-height: 1.65;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap;
+    padding: 14px 22px; border-bottom: 1px solid var(--edge);
+  }
+  .brand { font-size: 15px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
+  nav { margin-left: auto; display: flex; gap: 18px; font-size: 13px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  nav a.activ { color: var(--ink); border-bottom: 1px solid var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 36px 22px 80px; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 6px; }
+  .actualizat { color: var(--muted); font-size: 13px; margin-bottom: 30px; }
+  h2 {
+    font-size: 16px; margin: 36px 0 10px; padding-top: 18px;
+    border-top: 1px solid var(--edge);
+  }
+  h3 { font-size: 14px; margin: 22px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 7px; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 18px; font-size: 14px; }
+  th {
+    text-align: left; font-size: 11px; font-weight: 600; color: var(--muted);
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--edge);
+  }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid rgba(31,58,66,.5); vertical-align: top; }
+  code { font-family: var(--mono); font-size: 13px;
+         background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+  .caseta {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-left: 3px solid var(--accent);
+    padding: 16px 18px; border-radius: 8px; margin: 0 0 20px;
+  }
+  .caseta.atentie { border-left-color: var(--warn); }
+  .caseta p:last-child, .caseta ul:last-child { margin-bottom: 0; }
+  .necompletat {
+    background: rgba(227,182,70,.10); border: 1px solid var(--warn);
+    color: var(--warn); padding: 14px 18px; border-radius: 8px;
+    margin: 0 0 28px; font-size: 14px;
+  }
+  .lipsa {
+    color: var(--warn); background: rgba(227,182,70,.12);
+    padding: 1px 6px; border-radius: 4px; font-family: var(--mono); font-size: 13px;
+  }
+  footer {
+    border-top: 1px solid var(--edge); margin-top: 50px; padding-top: 20px;
+    color: var(--muted); font-size: 13px;
+  }
+  footer a { margin-right: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">SonicGrid</div>
+  <nav>
+    <a href="/confidentialitate" {% if pagina == 'conf' %}class="activ"{% endif %}>Confidențialitate</a>
+    <a href="/termeni" {% if pagina == 'termeni' %}class="activ"{% endif %}>Termeni</a>
+    <a href="/cookieuri" {% if pagina == 'cookie' %}class="activ"{% endif %}>Cookie-uri</a>
+    <a href="/despre" {% if pagina == 'despre' %}class="activ"{% endif %}>Despre</a>
+    <a href="/">Dashboard</a>
+  </nav>
+</header>
+
+<main>
+  {% if necompletate %}
+  <div class="necompletat">
+    <b>Document incomplet.</b> {{ necompletate|length }} câmpuri nu au fost completate
+    încă: <code>{{ necompletate|join(', ') }}</code>.
+    Sunt marcate mai jos. Completează-le în <code>legal.py</code> înainte de a
+    arăta sistemul în afara echipei.
+  </div>
+  {% endif %}
+
+  {% block continut %}{% endblock %}
+
+  <footer>
+    <a href="/confidentialitate">Confidențialitate</a>
+    <a href="/termeni">Termeni</a>
+    <a href="/cookieuri">Cookie-uri</a>
+    <a href="/despre">Despre</a>
+    <div style="margin-top:10px">
+      © {{ L.an_copyright }} {{ L.detinator_drepturi }} · versiunea documentelor:
+      {{ L.TERMS_VERSION }}
+    </div>
+  </footer>
+</main>
+
+</body>
+</html>

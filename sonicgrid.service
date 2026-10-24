@@ -1,0 +1,14 @@
+[Unit]
+Description=SonicGrid server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bobo
+WorkingDirectory=/home/bobo/sonicgrid
+ExecStart=/home/pi/sonicgrid/venv/bin/waitress-serve --host=0.0.0.0 --port=5000 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

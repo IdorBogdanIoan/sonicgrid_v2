@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Utilizatori — SonicGrid</title>
+<style>
+  :root {
+    --ground: #0D1A1E; --panel: #14262C; --edge: #1F3A42;
+    --ink: #DEEAEC; --muted: #7C949B;
+    --accent: #3FB6A8; --alert: #D33049; --warn: #E3B646;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--ui); font-size: 14px;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 24px;
+    padding: 14px 22px; border-bottom: 1px solid var(--edge);
+  }
+  .brand {
+    font-size: 15px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase;
+  }
+  .site { font-size: 13px; color: var(--muted); }
+  .right { margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 13px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { max-width: 1040px; margin: 0 auto; padding: 26px 22px 60px; }
+  h2 { font-size: 13px; font-weight: 600; letter-spacing: .1em;
+       text-transform: uppercase; color: var(--muted);
+       margin: 32px 0 12px; }
+  h2:first-child { margin-top: 0; }
+  .card { background: var(--panel); border: 1px solid var(--edge);
+          border-radius: 10px; padding: 18px 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-size: 11px; font-weight: 600; color: var(--muted);
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 0 10px 9px 0; border-bottom: 1px solid var(--edge);
+  }
+  td { padding: 10px 10px 10px 0; border-bottom: 1px solid rgba(31,58,66,.5);
+       vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  .nume { font-family: var(--mono); }
+  .rol {
+    font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    letter-spacing: .04em;
+  }
+  .rol.admin    { background: rgba(227,182,70,.16); color: var(--warn); }
+  .rol.operator { background: rgba(63,182,168,.14); color: var(--accent); }
+  .eu { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  .cand { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], select {
+    padding: 8px 10px; background: var(--ground); color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 6px;
+    font-family: var(--mono); font-size: 13px;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    padding: 8px 14px; border: 1px solid var(--edge); border-radius: 6px;
+    background: var(--ground); color: var(--ink);
+    font-family: var(--ui); font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primar { background: var(--accent); color: #06231F; border-color: var(--accent);
+                  font-weight: 600; }
+  button.rau:hover { border-color: var(--alert); color: var(--alert); }
+  .rand { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .camp { display: flex; flex-direction: column; gap: 5px; }
+  .camp label { font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  .mesaj, .eroare {
+    padding: 11px 14px; border-radius: 7px; margin-bottom: 18px; font-size: 13px;
+  }
+  .mesaj  { background: rgba(63,182,168,.10); border: 1px solid var(--accent); }
+  .eroare { background: rgba(211,48,73,.14); border: 1px solid var(--alert); }
+  .jurnal { font-family: var(--mono); font-size: 12px; line-height: 1.75; }
+  .jurnal div { display: flex; gap: 14px; white-space: nowrap;
+                overflow: hidden; text-overflow: ellipsis; }
+  .jurnal .t { color: var(--muted); }
+  .jurnal .a { min-width: 170px; }
+  .jurnal .esuat { color: var(--alert); }
+  .nota { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 10px; }
+  form.inline { display: inline; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">SonicGrid</div>
+  <div class="site">Administrare utilizatori</div>
+  <div class="right">
+    <a href="/">← Dashboard</a>
+    <span>{{ current_user }} ({{ current_role }})</span>
+    <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <button type="submit">Ieși</button>
+    </form>
+  </div>
+</header>
+
+<main>
+
+  {% if mesaj %}<div class="mesaj">{{ mesaj }}</div>{% endif %}
+  {% if eroare %}<div class="eroare">{{ eroare }}</div>{% endif %}
+
+  <h2>Utilizatori ({{ utilizatori|length }})</h2>
+  <div class="card">
+    <table>
+      <tr>
+        <th>Utilizator</th><th>Rol</th><th>Ultimul login</th><th></th>
+      </tr>
+      {% for u in utilizatori %}
+      <tr>
+        <td class="nume">
+          {{ u.username }}
+          {% if u.username == current_user %}<span class="eu">(tu)</span>{% endif %}
+        </td>
+        <td><span class="rol {{ u.role }}">{{ u.role }}</span></td>
+        <td class="cand">
+          {% if u.last_login %}{{ u.last_login | int | timp }}{% else %}niciodată{% endif %}
+        </td>
+        <td style="text-align:right">
+          <form method="post" class="inline">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <input type="hidden" name="username" value="{{ u.username }}">
+            <input type="hidden" name="actiune" value="rol">
+            <select name="role" onchange="this.form.submit()">
+              {% for r in roluri %}
+              <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% if u.username != current_user %}
+          <form method="post" class="inline"
+                onsubmit="return confirm('Ștergi utilizatorul {{ u.username }}?')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <input type="hidden" name="username" value="{{ u.username }}">
+            <input type="hidden" name="actiune" value="sterge">
+            <button type="submit" class="rau">Șterge</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="nota">
+      Ultimul administrator nu poate fi șters și nici retrogradat — altfel nimeni
+      nu ar mai putea administra sistemul.
+    </div>
+  </div>
+
+  <h2>Utilizator nou</h2>
+  <div class="card">
+    <form method="post" class="rand">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="actiune" value="creeaza">
+      <div class="camp">
+        <label for="n-user">Utilizator</label>
+        <input id="n-user" name="username" type="text" required
+               pattern="[a-zA-Z0-9_.\-]{3,32}" autocomplete="off"
+               autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="camp">
+        <label for="n-rol">Rol</label>
+        <select id="n-rol" name="role">
+          <option value="operator">operator</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div class="camp">
+        <label for="n-p1">Parolă (min. 10)</label>
+        <input id="n-p1" name="password" type="password" required
+               minlength="10" autocomplete="new-password">
+      </div>
+      <div class="camp">
+        <label for="n-p2">Repetă</label>
+        <input id="n-p2" name="password2" type="password" required
+               minlength="10" autocomplete="new-password">
+      </div>
+      <button type="submit" class="primar">Creează</button>
+    </form>
+    <div class="nota">
+      <b>operator</b> vede doar dashboard-ul. <b>admin</b> vede dashboard-ul și
+      poate gestiona utilizatorii.
+    </div>
+  </div>
+
+  <h2>Schimbă o parolă</h2>
+  <div class="card">
+    <form method="post" class="rand">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="actiune" value="parola">
+      <div class="camp">
+        <label for="p-user">Utilizator</label>
+        <select id="p-user" name="username">
+          {% for u in utilizatori %}<option value="{{ u.username }}">{{ u.username }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="camp">
+        <label for="p-p1">Parolă nouă</label>
+        <input id="p-p1" name="password" type="password" required
+               minlength="10" autocomplete="new-password">
+      </div>
+      <div class="camp">
+        <label for="p-p2">Repetă</label>
+        <input id="p-p2" name="password2" type="password" required
+               minlength="10" autocomplete="new-password">
+      </div>
+      <button type="submit">Schimbă</button>
+    </form>
+  </div>
+
+  <h2>Jurnal de acces (ultimele {{ audit|length }})</h2>
+  <div class="card jurnal">
+    {% for e in audit %}
+    <div>
+      <span class="t">{{ e.ts | int | timp }}</span>
+      <span class="a {% if 'esuat' in e.action or 'blocat' in e.action %}esuat{% endif %}">
+        {{ e.action }}
+      </span>
+      <span>{{ e.actor or '—' }}</span>
+      <span class="t">{{ e.detail or '' }}</span>
+      <span class="t">{{ e.ip or '' }}</span>
+    </div>
+    {% else %}
+    <div class="t">Niciun eveniment înregistrat încă.</div>
+    {% endfor %}
+  </div>
+
+</main>
+</body>
+</html>

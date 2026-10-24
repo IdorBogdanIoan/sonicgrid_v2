@@ -1,0 +1,38 @@
+{% extends "web/base.html" %}
+{% block title %}Autentificare · SonicGrid{% endblock %}
+{% block head %}<style>
+.wrap{display:flex;justify-content:center;padding-top:4vh}
+.card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:28px}
+.card h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--muted);margin:18px 0}
+.check input{margin-top:3px}
+.err{background:var(--err-bg);color:var(--err);border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:8px}
+.info{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:8px}
+button{width:100%}
+.note{font-size:12px;color:var(--muted);margin-top:16px}
+</style>{% endblock %}
+{% block content %}
+<div class="wrap"><div class="card">
+  <h1>Autentificare</h1>
+  <p class="sub">Acces restricționat. Doar pentru personal autorizat.</p>
+  {% if reaccept %}<div class="info">Termenii sau Politica de confidențialitate s-au actualizat. Te rugăm să îi citești și să îi accepți din nou.</div>{% endif %}
+  {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ url_for('web.login') }}" autocomplete="on">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="u">Utilizator</label>
+    <input id="u" name="username" type="text" autocomplete="username" required autofocus>
+    <label for="p">Parolă</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <div class="check">
+      <input id="a" name="accept" type="checkbox" required>
+      <label for="a" style="margin:0;font-weight:400">Am citit și accept <a href="{{ url_for('web.terms') }}" target="_blank">Termenii de utilizare</a> și <a href="{{ url_for('web.privacy') }}" target="_blank">Politica de confidențialitate</a>.</label>
+    </div>
+    <button type="submit">Intră în cont</button>
+  </form>
+  <p class="note">Accesul și încercările de autentificare sunt înregistrate în scop de securitate. Folosim doar un cookie strict necesar pentru sesiune.</p>
+</div></div>
+{% endblock %}

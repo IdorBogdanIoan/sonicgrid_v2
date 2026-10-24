@@ -1,0 +1,23 @@
+{
+  "operator1": {
+    "password": "scrypt:32768:8:1$HFK4zWSSmbOt5cs9$96786590faad7fd6458a9a8a5f91655d33d9ebe6eec87feb7cbfc39248396b08cec8c9511cc774b2861f9e9938808b591437358c73d512f4421724bbcbc86161",
+    "rol": "operator",
+    "terms_version": "2026-09-21",
+    "terms_accepted_at": "2026-10-23T07:07:32+00:00",
+    "last_login": "2026-10-23T07:07:32+00:00"
+  },
+  "bobo": {
+    "password": "scrypt:32768:8:1$hPRiW5WeBCV6wpJ9$2cc9c83905d022db2511e866ac5b4349dc944dc8e5a119c3f4d53182dbf0af63f4d6ce1c965a2a0fa340708bc97d61d612f4fd30b9c9a94cf6405b7f5de2b3fe",
+    "rol": "admin",
+    "terms_version": "2026-09-21",
+    "terms_accepted_at": "2026-10-24T08:30:50+00:00",
+    "last_login": "2026-10-24T08:30:50+00:00"
+  },
+  "nume": {
+    "password": "scrypt:32768:8:1$WIWXXeMEXZa6RNFL$65d9823c6038b0befd282d576bef974dc33f5d662db691c479822429aa9e82efd748ebcedfd2311fcb0601f2151da2c15ad45587a8289fe7ad3f451a38fc0398",
+    "rol": "admin",
+    "terms_version": "2026-09-21",
+    "terms_accepted_at": "2026-10-24T10:15:38+00:00",
+    "last_login": "2026-10-24T10:15:38+00:00"
+  }
+}

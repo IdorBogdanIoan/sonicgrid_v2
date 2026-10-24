@@ -1,0 +1,14 @@
+{% extends "web/base.html" %}
+{% block title %}Deconectare · SonicGrid{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:center;padding-top:6vh">
+<div class="doc" style="max-width:400px;text-align:center">
+  <h1 style="font-size:22px">Deconectare</h1>
+  <p class="meta">Ești autentificat ca <strong>{{ current_user }}</strong>.</p>
+  <form method="post" action="{{ url_for('web.logout') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <button type="submit" style="width:100%">Ieși din cont</button>
+  </form>
+  <p style="margin-top:14px"><a href="/">Înapoi la dashboard</a></p>
+</div></div>
+{% endblock %}

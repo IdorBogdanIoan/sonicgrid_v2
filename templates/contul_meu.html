@@ -1,0 +1,85 @@
+{% extends "legal_base.html" %}
+{% block titlu %}Contul meu{% endblock %}
+{% block continut %}
+
+<h1>Contul meu</h1>
+<div class="actualizat">{{ utilizator.username }} · rol: {{ utilizator.role }}</div>
+
+{% if eroare %}
+<div class="necompletat" style="color:#D33049;border-color:#D33049;background:rgba(211,48,73,.12)">
+  {{ eroare }}
+</div>
+{% endif %}
+
+<h2>Ce date avem despre tine</h2>
+
+<table>
+  <tr><th>Nume de utilizator</th><td>{{ utilizator.username }}</td></tr>
+  <tr><th>Rol</th><td>{{ utilizator.role }}</td></tr>
+  <tr><th>Cont creat</th><td>{{ utilizator.created_at | timp }}</td></tr>
+  <tr><th>Ultima autentificare</th><td>{{ utilizator.last_login | timp }}</td></tr>
+  <tr><th>Versiunea termenilor acceptată</th><td>{{ utilizator.terms_version or '—' }}</td></tr>
+  <tr><th>Acceptată la</th><td>{{ utilizator.terms_at | timp }}</td></tr>
+  <tr><th>Parola</th><td>stocată doar ca hash scrypt — nimeni, nici administratorii, nu o poate citi</td></tr>
+</table>
+
+<p>
+  În plus, se păstrează jurnalul autentificărilor tale (reușite și eșuate), cu ora
+  și adresa IP, timp de {{ L.retentie_jurnal_acces_zile }} zile. Îl poți descărca
+  mai jos.
+</p>
+
+<h2>Dreptul de acces și portabilitate</h2>
+
+<p>
+  Articolele 15 și 20 din GDPR îți dau dreptul să afli ce date te privesc și să le
+  primești într-un format structurat. Butonul de mai jos îți descarcă tot, ca
+  fișier JSON.
+</p>
+
+<form method="post">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="actiune" value="export">
+  <button type="submit" style="padding:9px 16px;border:1px solid #1F3A42;border-radius:6px;
+          background:#0D1A1E;color:#DEEAEC;font-size:14px;cursor:pointer">
+    Descarcă datele mele (JSON)
+  </button>
+</form>
+
+<h2>Dreptul la ștergere</h2>
+
+<div class="caseta atentie">
+  <p>
+    Ștergerea contului este <b>definitivă</b>. Îți dispar numele de utilizator,
+    rolul și hash-ul parolei. Vei fi deconectat imediat și nu vei mai putea intra
+    decât dacă un administrator îți face alt cont.
+  </p>
+  <p>
+    Măsurătorile și alertele <b>nu</b> se șterg odată cu contul: ele nu îți
+    aparțin și nu sunt legate de tine în niciun fel. Se șterg singure, după
+    termenele din <a href="/confidentialitate">politica de confidențialitate</a>.
+  </p>
+</div>
+
+<form method="post" onsubmit="return confirm('Sigur ștergi contul? Nu se poate anula.')">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="actiune" value="sterge">
+  <p style="margin-bottom:10px">
+    Scrie <code>{{ utilizator.username }}</code> ca să confirmi:
+  </p>
+  <input name="confirm" type="text" required autocomplete="off"
+         style="padding:9px 12px;background:#0D1A1E;color:#DEEAEC;border:1px solid #1F3A42;
+                border-radius:6px;font-family:ui-monospace,monospace;font-size:14px">
+  <button type="submit"
+          style="padding:9px 16px;border:1px solid #D33049;border-radius:6px;
+                 background:#0D1A1E;color:#D33049;font-size:14px;cursor:pointer">
+    Șterge contul definitiv
+  </button>
+</form>
+
+<p style="margin-top:14px;color:#7C949B;font-size:13px">
+  Dacă ești ultimul administrator, ștergerea e refuzată — altfel nimeni nu ar mai
+  putea administra sistemul. Promovează pe altcineva întâi.
+</p>
+
+{% endblock %}

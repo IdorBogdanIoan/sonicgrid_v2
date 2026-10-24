@@ -1,0 +1,218 @@
+{% extends "legal_base.html" %}
+{% block titlu %}Politica de confidențialitate{% endblock %}
+{% block continut %}
+
+<h1>Politica de confidențialitate</h1>
+<div class="actualizat">Ultima actualizare: {{ L.ultima_actualizare }} · versiunea {{ L.TERMS_VERSION }}</div>
+
+<div class="caseta">
+  <p><b>Pe scurt, ca să nu fie nevoie să citești tot:</b></p>
+  <ul>
+    <li>Sistemul măsoară <b>cât de tare</b> e sunetul, nu <b>ce</b> se spune.</li>
+    <li>Nu se înregistrează și nu se transmite audio. Nu există microfon care să trimită sunet către server.</li>
+    <li>Nu există camere video.</li>
+    <li>Nu rulează recunoaștere de vorbire și nu se caută cuvinte.</li>
+    <li>Sistemul nu poate identifica nicio persoană, nici direct, nici prin combinarea datelor pe care le are.</li>
+  </ul>
+</div>
+
+<h2>1. Cine prelucrează datele</h2>
+
+<table>
+  <tr><th>Operator</th><td>{{ camp(L.operator) }}</td></tr>
+  <tr><th>Contact</th><td>{{ camp(L.operator_email) }}</td></tr>
+  <tr><th>Proiect</th><td>{{ L.proiect }} — {{ L.descriere_scurta }}</td></tr>
+  <tr><th>Zonă monitorizată</th><td>{{ camp(L.locatie_monitorizata) }}</td></tr>
+</table>
+
+<h2>2. Ce face efectiv sistemul</h2>
+
+<p>
+  SonicGrid este o rețea de noduri cu microfon amplasate în zona indicată mai sus.
+  Fiecare nod măsoară continuu <b>nivelul sonor</b> din jur și îl transformă imediat
+  într-un singur număr: nivelul exprimat în dBFS. Sunetul propriu-zis nu părăsește
+  niciodată nodul și nu este stocat nicăieri.
+</p>
+
+<p>
+  Când un nod detectează un sunet neobișnuit de puternic față de fondul din acel
+  moment, trimite prin radio un pachet de 16 octeți care conține: identificatorul
+  nodului, un număr de ordine, nivelul măsurat și momentul detecției. Atât.
+  Pachetul nu conține audio și nu are cum să conțină, fiind de 16 octeți.
+</p>
+
+<h3>Ce se stochează pe server</h3>
+
+<table>
+  <tr><th>Date</th><th>De ce</th><th>Cât timp</th></tr>
+  <tr>
+    <td>Nivelul sonor măsurat de fiecare nod, aproximativ o dată la 5 secunde</td>
+    <td>Afișarea stării curente și verificarea funcționării nodurilor</td>
+    <td>{{ L.retentie_masuratori_zile }} zile</td>
+  </tr>
+  <tr>
+    <td>Alertele: momentul, nodurile care au detectat, nivelurile</td>
+    <td>Semnalarea unui posibil incident către operator</td>
+    <td>{{ L.retentie_alerte_zile }} zile</td>
+  </tr>
+</table>
+
+<p>
+  După termenele de mai sus, datele se șterg <b>automat</b>, printr-un proces care
+  rulează zilnic. Nu e o promisiune pe hârtie: ștergerea e implementată în cod și
+  folosește exact valorile afișate aici.
+</p>
+
+<h3>Ce NU se stochează</h3>
+
+<ul>
+  <li><b>Audio</b> — nicio înregistrare, nici măcar temporară, pe server.</li>
+  <li><b>Imagini</b> — sistemul nu are nicio cameră.</li>
+  <li><b>Conținutul vorbirii</b> — nu rulează recunoaștere de vorbire și nu se caută cuvinte.</li>
+  <li><b>Identitatea persoanelor</b> — nu există nume, fețe, voci, telefoane sau orice alt identificator.</li>
+  <li><b>Locația persoanelor</b> — se cunoaște poziția fixă a nodurilor, nu a oamenilor.</li>
+</ul>
+
+<h2>3. Sunt acestea date cu caracter personal?</h2>
+
+<p>
+  Considerăm că <b>nu</b>. Un nivel sonor măsurat într-un punct fix nu permite,
+  singur sau combinat cu celelalte date pe care le deținem, identificarea unei
+  persoane. Nu există nicio cale de la „la ora 14:32 nodul n3 a măsurat −18 dBFS"
+  la o persoană anume.
+</p>
+
+<p>
+  Cu toate acestea, pentru că sistemul funcționează într-un spațiu accesibil
+  publicului, aplicăm principiile GDPR ca și cum ar fi vorba de date personale:
+  colectăm strict minimul necesar, ștergem automat după un termen fix, limităm
+  accesul și documentăm ce facem. Preferăm să fim mai stricți decât e nevoie.
+</p>
+
+<div class="caseta atentie">
+  <p>
+    <b>Temei legal invocat:</b> {{ camp(L.temei_legal) }}
+  </p>
+  <p>
+    Interesul legitim urmărit: {{ L.interes_legitim|lower }}.
+  </p>
+</div>
+
+<h2>4. Datele persoanelor cu cont de operator</h2>
+
+<p>
+  Separat de cele de mai sus, pentru persoanele care au cont în sistem (operatori
+  și administratori) se prelucrează date care <b>sunt</b> date cu caracter personal:
+</p>
+
+<table>
+  <tr><th>Date</th><th>De ce</th><th>Cât timp</th></tr>
+  <tr>
+    <td>Numele de utilizator ales</td>
+    <td>Identificarea în sistem</td>
+    <td>Cât există contul</td>
+  </tr>
+  <tr>
+    <td>Parola, stocată doar ca hash criptografic (scrypt)</td>
+    <td>Autentificare. Parola în clar nu e cunoscută nici de administratori.</td>
+    <td>Cât există contul</td>
+  </tr>
+  <tr>
+    <td>Jurnal de acces: autentificări reușite și eșuate, adresa IP, ora</td>
+    <td>Securitate — detectarea accesului neautorizat</td>
+    <td>{{ L.retentie_jurnal_acces_zile }} zile</td>
+  </tr>
+</table>
+
+<h2>5. Cine are acces</h2>
+
+<ul>
+  <li><b>Operatorii</b> — văd starea nodurilor și alertele.</li>
+  <li><b>Administratorii</b> — în plus, gestionează conturile.</li>
+  <li><b>Operatorul</b> — acces tehnic la server, pentru dezvoltare și întreținere.</li>
+</ul>
+
+<p>
+  Datele nu se transmit către terți, nu se vând, nu se folosesc pentru publicitate
+  și nu părăsesc Spațiul Economic European. Serverul rulează local, pe un
+  calculator aflat în administrarea echipei de proiect, nu într-un serviciu cloud.
+</p>
+
+<p>
+  Singura resursă externă este fundalul de hartă, furnizat de OpenStreetMap.
+  Browserul tău cere acele imagini direct de la serverele OpenStreetMap, care îți
+  pot vedea adresa IP. Sistemul funcționează complet și fără acest fundal.
+</p>
+
+<h2>6. Drepturile tale</h2>
+
+<p>Conform GDPR, ai următoarele drepturi:</p>
+
+<ul>
+  <li><b>Acces</b> (art. 15) — să afli ce date te privesc.</li>
+  <li><b>Rectificare</b> (art. 16) — corectarea datelor inexacte.</li>
+  <li><b>Ștergere</b> (art. 17) — eliminarea datelor.</li>
+  <li><b>Restricționare</b> (art. 18) — limitarea prelucrării.</li>
+  <li><b>Opoziție</b> (art. 21) — să te opui prelucrării bazate pe interes legitim.</li>
+  <li><b>Portabilitate</b> (art. 20) — primirea datelor într-un format structurat.</li>
+</ul>
+
+<p>
+  Pentru conturile de operator, drepturile de acces și de ștergere se pot exercita
+  direct din aplicație, din pagina <a href="/contul-meu">Contul meu</a>.
+</p>
+
+<div class="caseta atentie">
+  <p>
+    <b>O limitare pe care preferăm să o spunem direct:</b> pentru persoanele din
+    zona monitorizată, nu putem da curs unei cereri de acces sau de ștergere —
+    nu pentru că nu vrem, ci pentru că nu avem cum să legăm vreo înregistrare de
+    o persoană anume. Un nivel sonor nu are proprietar identificabil. Dacă ne-ai
+    cere datele care te privesc, nu am avea cum să le găsim.
+  </p>
+</div>
+
+<p>
+  Pentru orice cerere sau nelămurire, scrie la {{ camp(L.operator_email) }}.
+</p>
+
+<h2>7. Dreptul de a depune plângere</h2>
+
+<p>
+  Dacă apreciezi că drepturile tale au fost încălcate, te poți adresa
+  <b>Autorității Naționale de Supraveghere a Prelucrării Datelor cu Caracter
+  Personal (ANSPDCP)</b>, B-dul G-ral. Gheorghe Magheru nr. 28-30, sector 1,
+  București, <a href="https://www.dataprotection.ro" rel="noopener">www.dataprotection.ro</a>.
+  Ai de asemenea dreptul de a te adresa justiției.
+</p>
+
+<h2>8. Decizii automate</h2>
+
+<p>
+  Sistemul semnalează un posibil eveniment sonor către un operator uman. <b>Nu ia
+  nicio decizie automată</b> cu efecte asupra vreunei persoane și nu declanșează
+  singur nicio acțiune. Orice intervenție este decisă de un om care se uită la
+  alertă.
+</p>
+
+<h2>9. Securitate</h2>
+
+<ul>
+  <li>Comunicația radio între noduri și gateway este criptată.</li>
+  <li>Accesul la interfață cere autentificare, cu parole stocate doar ca hash.</li>
+  <li>Accesul se blochează temporar după mai multe încercări greșite.</li>
+  <li>Se recomandă rularea exclusiv prin HTTPS.</li>
+  <li>Fiecare acces și fiecare modificare de cont se înregistrează în jurnal.</li>
+  <li>Datele se șterg automat la expirarea termenului de păstrare.</li>
+</ul>
+
+<h2>10. Modificări</h2>
+
+<p>
+  Când modificăm substanțial acest document, creștem versiunea afișată în subsol,
+  iar utilizatorii cu cont sunt rugați să ia din nou la cunoștință conținutul la
+  următoarea autentificare. Versiunea acceptată și momentul acceptării se
+  păstrează ca dovadă.
+</p>
+
+{% endblock %}

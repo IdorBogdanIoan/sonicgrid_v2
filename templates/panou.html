@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<title>Panou de informare — SonicGrid</title>
+<style>
+  /* Panou A4 pentru montat la intrarile in zona monitorizata.
+     Se completeaza singur din legal.py - nu are campuri de umplut cu mana.
+     Ctrl+P si gata. */
+  @page { size: A4 portrait; margin: 8mm; }
+  @media print {
+    html, body { margin: 0 !important; padding: 0 !important;
+                 background: #fff !important; height: auto !important; }
+    .panou { box-shadow: none !important; margin: 0 !important; }
+    .bara { display: none !important; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: Carlito, Calibri, "DejaVu Sans", sans-serif;
+    color: #10243d; background: #fff;
+  }
+  .panou {
+    width: 100%; padding: 9mm;
+    border: 3px solid #10243d; border-radius: 6mm;
+    display: flex; flex-direction: column; page-break-inside: avoid;
+  }
+  .sus { display: flex; align-items: center; gap: 7mm; margin-bottom: 5.5mm; }
+  .simbol {
+    flex: none; width: 23mm; height: 23mm; border: 2.5mm solid #10243d;
+    border-radius: 50%; display: grid; place-items: center;
+    font-size: 11mm; line-height: 1;
+  }
+  h1 { font-size: 8.6mm; line-height: 1.1; margin: 0 0 2mm; }
+  .sub { font-size: 4.6mm; color: #3f5668; }
+  .mare {
+    background: #f2f6f8; border-left: 2.5mm solid #1B7F82;
+    padding: 5mm 6mm; margin-bottom: 5.5mm; border-radius: 0 3mm 3mm 0;
+  }
+  .mare > b { font-size: 5.4mm; display: block; margin-bottom: 3mm; }
+  ul { margin: 0; padding-left: 6mm; font-size: 4.3mm; line-height: 1.45; }
+  li { margin-bottom: 1.8mm; }
+  h2 {
+    font-size: 4.4mm; text-transform: uppercase; letter-spacing: .5mm;
+    color: #3f5668; margin: 0 0 2.5mm;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 4.4mm; margin-bottom: 6mm; }
+  td { padding: 1.5mm 0; border-bottom: .3mm solid #d6e0e6; vertical-align: top; }
+  td:first-child { width: 42mm; color: #3f5668; }
+  .jos { margin-top: auto; display: flex; gap: 7mm; align-items: flex-start; }
+  .qr {
+    flex: none; width: 32mm; height: 32mm; border: .5mm dashed #9aa7b4;
+    border-radius: 2mm; display: grid; place-items: center; text-align: center;
+    font-size: 3.2mm; color: #7a8894; padding: 2mm; line-height: 1.35;
+  }
+  .contact { font-size: 4.3mm; line-height: 1.55; }
+  .adresa { font-family: ui-monospace, Consolas, monospace; font-size: 4mm;
+            word-break: break-all; }
+  .nota { margin-top: 4mm; font-size: 3.7mm; color: #6b7a86; line-height: 1.5; }
+  .bara {
+    max-width: 196mm; margin: 6mm auto; padding: 4mm 6mm;
+    background: #10243d; color: #dbe6ea; border-radius: 3mm;
+    font-size: 3.9mm; line-height: 1.6;
+  }
+  .bara b { color: #fff; }
+  @media screen {
+    body { background: #e8eef1; padding: 8mm; }
+    .panou { background: #fff; max-width: 196mm; margin: 0 auto;
+             box-shadow: 0 2mm 8mm rgba(0,0,0,.14); }
+  }
+</style>
+</head>
+<body>
+
+<div class="bara">
+  <b>Panou gata de printat.</b> Ctrl+P, A4, cu fundaluri activate. Datele vin din
+  <code>legal.py</code>, deci nu ai nimic de completat cu mâna. Singurul lucru de
+  adăugat este codul QR către adresa de mai jos — îl generezi cu orice generator
+  gratuit și îl lipești în chenar.
+</div>
+
+<div class="panou">
+
+  <div class="sus">
+    <div class="simbol">◉))</div>
+    <div>
+      <h1>Zonă cu senzori acustici</h1>
+      <div class="sub">Sistem de detectare a evenimentelor sonore puternice</div>
+    </div>
+  </div>
+
+  <div class="mare">
+    <b>Se măsoară doar cât de tare e sunetul. Nimic altceva.</b>
+    <ul>
+      <li><b>Nu</b> se înregistrează și <b>nu</b> se transmite audio</li>
+      <li><b>Nu</b> există camere video</li>
+      <li><b>Nu</b> se ascultă conversații și nu se caută cuvinte</li>
+      <li><b>Nu</b> se identifică persoane</li>
+    </ul>
+  </div>
+
+  <h2>Informații despre prelucrare</h2>
+  <table>
+    <tr><td>Operator</td><td>{{ L.operator }}</td></tr>
+    <tr><td>Zona monitorizată</td><td>{{ L.locatie_monitorizata }}</td></tr>
+    <tr>
+      <td>Scopul</td>
+      <td>{{ L.interes_legitim }}</td>
+    </tr>
+    <tr><td>Temei legal</td><td>{{ L.temei_legal }}</td></tr>
+    <tr>
+      <td>Ce se păstrează</td>
+      <td>Nivelul sonor măsurat și momentul detecției. Fără audio, fără imagini.</td>
+    </tr>
+    <tr>
+      <td>Cât timp</td>
+      <td>{{ L.retentie_masuratori_zile }} de zile pentru măsurători,
+          {{ L.retentie_alerte_zile }} pentru alerte. Apoi se șterg automat.</td>
+    </tr>
+    <tr>
+      <td>Drepturile dumneavoastră</td>
+      <td>Acces, rectificare, ștergere, restricționare, opoziție, portabilitate
+          (art. 15–21 GDPR), precum și dreptul de a depune plângere la ANSPDCP,
+          www.dataprotection.ro</td>
+    </tr>
+  </table>
+
+  <div class="jos">
+    <div class="qr">
+      lipește aici<br>codul QR<br>către adresa<br>alăturată
+    </div>
+    <div class="contact">
+      <h2 style="margin-bottom:1.5mm">Informații complete</h2>
+      <div class="adresa">{{ url_conf }}</div>
+      <div style="margin-top:2mm">Contact: {{ L.operator_email }}</div>
+      <div class="nota">
+        Proiect academic, anul universitar {{ L.an_universitar }}. Acest sistem nu
+        înlocuiește serviciile de urgență. În caz de urgență sunați la <b>112</b>.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

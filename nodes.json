@@ -1,0 +1,40 @@
+{
+  "site": {
+    "name": "SonicGrid - platoul Regie",
+    "lat": 44.445505,
+    "lon": 26.052335,
+    "zoom": 19
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Nod 1 - est",
+      "lat": 44.445415,
+      "lon": 26.052698
+    },
+    {
+      "id": "n2",
+      "name": "Nod 2 - nord",
+      "lat": 44.445780,
+      "lon": 26.052366
+    },
+    {
+      "id": "n3",
+      "name": "Nod 3 - vest",
+      "lat": 44.445491,
+      "lon": 26.051994
+    },
+    {
+      "id": "n4",
+      "name": "Nod 4 - sud",
+      "lat": 44.445334,
+      "lon": 26.052282
+    },
+    {
+      "id": "n5",
+      "name": "Nod 5 - centru (gateway)",
+      "lat": 44.445505,
+      "lon": 26.052335
+    }
+  ]
+}

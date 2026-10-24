@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autentificare — SonicGrid</title>
+<style>
+  :root {
+    --ground: #0D1A1E; --panel: #14262C; --edge: #1F3A42;
+    --ink: #DEEAEC; --muted: #7C949B;
+    --accent: #3FB6A8; --alert: #D33049;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: grid; place-items: center; padding: 24px;
+    background: var(--ground); color: var(--ink); font-family: var(--ui);
+  }
+  .card {
+    width: 100%; max-width: 380px;
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 32px 28px;
+  }
+  .brand {
+    font-size: 15px; font-weight: 650; letter-spacing: .14em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .sub { font-size: 13px; color: var(--muted); margin-bottom: 26px; }
+  label {
+    display: block; font-size: 12px; color: var(--muted);
+    margin: 0 0 6px; letter-spacing: .04em;
+  }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 10px 12px; margin-bottom: 16px;
+    background: var(--ground); color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 7px;
+    font-family: var(--mono); font-size: 14px;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    width: 100%; padding: 11px; border: 0; border-radius: 7px;
+    background: var(--accent); color: #06231F;
+    font-family: var(--ui); font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  .eroare, .setup {
+    padding: 11px 13px; border-radius: 7px; font-size: 13px;
+    line-height: 1.45; margin-bottom: 18px;
+  }
+  .eroare { background: rgba(211,48,73,.14); border: 1px solid var(--alert); }
+  .setup  { background: rgba(63,182,168,.10); border: 1px solid var(--accent); }
+  code {
+    font-family: var(--mono); font-size: 12px;
+    background: var(--ground); padding: 2px 5px; border-radius: 4px;
+    display: inline-block; margin-top: 4px;
+  }
+  .nota { margin-top: 20px; font-size: 11px; color: var(--muted); line-height: 1.7; }
+  .nota a { color: var(--muted); }
+  .accept {
+    display: flex; gap: 9px; align-items: flex-start;
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+    margin: 2px 0 20px;
+  }
+  .accept input { margin-top: 2px; accent-color: var(--accent); flex: none; }
+  .accept a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<form class="card" method="post" action="{{ url_for('auth.login') }}">
+  <div class="brand">SonicGrid</div>
+  <div class="sub">Autentificare operator</div>
+
+  {% if setup %}
+    <div class="setup">
+      Nu există niciun utilizator încă. Creează primul administrator pe Raspberry&nbsp;Pi:
+      <code>python3 sg_auth.py add &lt;nume&gt; --role admin</code>
+    </div>
+  {% else %}
+    {% if error %}<div class="eroare">{{ error }}</div>{% endif %}
+
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <label for="username">Utilizator</label>
+    <input id="username" name="username" type="text" autocomplete="username"
+           autocapitalize="off" autocorrect="off" spellcheck="false" required autofocus>
+
+    <label for="password">Parolă</label>
+    <input id="password" name="password" type="password"
+           autocomplete="current-password" required>
+
+    <label class="accept">
+      <input type="checkbox" name="accept" required>
+      <span>Am citit și iau la cunoștință
+        <a href="/termeni" target="_blank">Termenii de utilizare</a> și
+        <a href="/confidentialitate" target="_blank">Politica de confidențialitate</a>
+        (versiunea {{ L.TERMS_VERSION }}).</span>
+    </label>
+
+    <button type="submit">Intră</button>
+
+    <div class="nota">
+      După 5 încercări greșite, accesul se blochează 15 minute.<br>
+      <a href="/confidentialitate">Confidențialitate</a> ·
+      <a href="/termeni">Termeni</a> ·
+      <a href="/cookieuri">Cookie-uri</a> ·
+      <a href="/despre">Despre</a>
+    </div>
+  {% endif %}
+</form>
+
+</body>
+</html>

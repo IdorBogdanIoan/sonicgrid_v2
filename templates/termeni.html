@@ -1,0 +1,144 @@
+{% extends "legal_base.html" %}
+{% block titlu %}Termeni de utilizare{% endblock %}
+{% block continut %}
+
+<h1>Termeni de utilizare</h1>
+<div class="actualizat">Ultima actualizare: {{ L.ultima_actualizare }} · versiunea {{ L.TERMS_VERSION }}</div>
+
+<h2>1. Ce este acest sistem</h2>
+
+<p>
+  {{ L.proiect }} este o {{ L.descriere_scurta }}, realizată ca proiect academic
+  în anul universitar {{ L.an_universitar }}.
+</p>
+
+<div class="caseta atentie">
+  <p>
+    <b>Acesta este un prototip academic, nu un sistem de siguranță omologat.</b>
+  </p>
+  <p>
+    Nu înlocuiește serviciile de urgență, paza, supravegherea umană sau orice
+    sistem certificat de securitate. În caz de urgență, sună la <b>112</b>.
+  </p>
+</div>
+
+<h2>2. Cine poate folosi interfața</h2>
+
+<p>
+  Accesul este permis exclusiv persoanelor cărora li s-a creat un cont de către
+  un administrator. Nu există înregistrare publică.
+</p>
+
+<p>Ca utilizator cu cont, te obligi să:</p>
+
+<ul>
+  <li>nu îți împarți contul și parola cu altcineva;</li>
+  <li>anunți imediat un administrator dacă bănuiești că altcineva ți-a aflat parola;</li>
+  <li>folosești sistemul doar în scopul pentru care a fost creat;</li>
+  <li>nu încerci să ocolești autentificarea sau să accesezi date care nu îți sunt destinate;</li>
+  <li>nu transmiți în afara echipei datele la care ai acces.</li>
+</ul>
+
+<h2>3. Limitări pe care le declarăm deschis</h2>
+
+<p>
+  Un sistem de detecție prezentat onest trebuie să spună și ce nu poate. Acesta:
+</p>
+
+<ul>
+  <li>poate <b>rata</b> evenimente reale, în special pe fond zgomotos;</li>
+  <li>poate semnala <b>alarme false</b> — un sunet puternic nu înseamnă neapărat un incident;</li>
+  <li>nu identifică tipul sunetului cu certitudine: clasificatorul este în dezvoltare
+      și, pe datele colectate până acum, nu separă fiabil clasele vizate;</li>
+  <li>depinde de alimentare, de bateriile nodurilor și de legătura radio;</li>
+  <li>acoperă doar zona în care sunt amplasate nodurile.</li>
+</ul>
+
+<p>
+  O alertă este un <b>indiciu care merită verificat de un om</b>, nu o constatare.
+</p>
+
+<h2>4. Disponibilitate</h2>
+
+<p>
+  Sistemul este oferit „ca atare", fără garanție de funcționare continuă. Fiind un
+  proiect academic, poate fi oprit, modificat sau repornit oricând, fără anunț
+  prealabil, inclusiv în timpul unor teste.
+</p>
+
+<h2>5. Răspundere</h2>
+
+<p>
+  În măsura permisă de lege, {{ camp(L.operator) }} nu răspunde
+  pentru pagube rezultate din folosirea sau din imposibilitatea de a folosi acest
+  sistem, inclusiv dintr-un eveniment nedetectat sau dintr-o alertă falsă.
+</p>
+
+<p>
+  Această limitare nu se aplică în cazurile în care legea nu permite exonerarea de
+  răspundere.
+</p>
+
+<h2>6. Proprietate intelectuală</h2>
+
+<table>
+  <tr><th>Element</th><th>Regim</th></tr>
+  <tr>
+    <td>Codul sursă, firmware-ul, documentația și designul interfeței</td>
+    <td>© {{ L.an_copyright }} {{ camp(L.detinator_drepturi) }} — {{ camp(L.licenta_cod) }}</td>
+  </tr>
+  <tr>
+    <td>Denumirea „{{ L.proiect }}" și identitatea vizuală</td>
+    <td>{{ camp(L.detinator_drepturi) }}</td>
+  </tr>
+  <tr>
+    <td>Biblioteca de hartă Leaflet</td>
+    <td>Licență BSD-2-Clause, © Volodymyr Agafonkin și colaboratorii</td>
+  </tr>
+  <tr>
+    <td>Datele de hartă</td>
+    <td>© colaboratorii OpenStreetMap, licență ODbL</td>
+  </tr>
+  <tr>
+    <td>Flask și celelalte biblioteci Python folosite</td>
+    <td>Licențe open-source proprii, BSD și MIT</td>
+  </tr>
+</table>
+
+<p>
+  Reproducerea sau refolosirea codului în afara condițiilor licenței alese necesită
+  acordul scris al deținătorului drepturilor.
+</p>
+
+<h2>7. Date cu caracter personal</h2>
+
+<p>
+  Modul în care sunt tratate datele este descris separat, în
+  <a href="/confidentialitate">Politica de confidențialitate</a>, care face parte
+  integrantă din acești termeni.
+</p>
+
+<h2>8. Modificarea termenilor</h2>
+
+<p>
+  Acești termeni pot fi modificați. La o schimbare importantă, versiunea crește, iar
+  la următoarea autentificare ți se cere să iei din nou la cunoștință conținutul.
+  Continuarea folosirii sistemului după acel moment înseamnă acceptarea noii
+  versiuni.
+</p>
+
+<h2>9. Legea aplicabilă</h2>
+
+<p>
+  Acestor termeni li se aplică legea română. Eventualele litigii se soluționează de
+  instanțele competente din România.
+</p>
+
+<h2>10. Contact</h2>
+
+<p>
+  {{ camp(L.operator_email) }} — pentru orice întrebare legată de sistem sau de
+  acești termeni.
+</p>
+
+{% endblock %}

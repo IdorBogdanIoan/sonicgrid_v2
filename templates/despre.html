@@ -1,0 +1,97 @@
+{% extends "legal_base.html" %}
+{% block titlu %}Despre{% endblock %}
+{% block continut %}
+
+<h1>Despre {{ L.proiect }}</h1>
+<div class="actualizat">Proiect academic · anul universitar {{ L.an_universitar }}</div>
+
+<p>
+  {{ L.proiect }} este o {{ L.descriere_scurta }}. Nodurile ascultă permanent,
+  măsoară nivelul sonor și, când detectează un eveniment neobișnuit de puternic
+  față de fondul din acel moment, îl anunță prin radio. Dacă mai multe noduri
+  detectează același sunet în aceeași fereastră de timp, evenimentul este
+  considerat confirmat și apare ca alertă pe harta operatorului.
+</p>
+
+<h2>Cum funcționează</h2>
+
+<table>
+  <tr><th>Etapă</th><th>Ce se întâmplă</th></tr>
+  <tr>
+    <td>Măsurare</td>
+    <td>Fiecare nod calculează nivelul sonor la fiecare 20 de milisecunde. Sunetul
+        nu este înregistrat; din el rezultă un singur număr.</td>
+  </tr>
+  <tr>
+    <td>Detecție</td>
+    <td>Un filtru Kalman estimează continuu fondul sonor al locului. Un eveniment
+        este declarat când nivelul se abate statistic semnificativ de la fondul
+        învățat — nu la depășirea unui prag fix.</td>
+  </tr>
+  <tr>
+    <td>Transmisie</td>
+    <td>Un pachet de 16 octeți pleacă prin ESP-NOW, criptat, direct către gateway.
+        Fără WiFi, fără cablare, fără abonament de date.</td>
+  </tr>
+  <tr>
+    <td>Confirmare</td>
+    <td>Serverul grupează detecțiile venite de la noduri diferite în aceeași
+        fereastră de timp. Mai multe noduri înseamnă încredere mai mare.</td>
+  </tr>
+  <tr>
+    <td>Afișare</td>
+    <td>Alerta apare imediat pe harta operatorului, cu nodurile implicate și
+        nivelurile măsurate.</td>
+  </tr>
+</table>
+
+<h2>Ce nu face</h2>
+
+<ul>
+  <li>Nu înregistrează audio și nu transmite sunet.</li>
+  <li>Nu ascultă conversații și nu caută cuvinte.</li>
+  <li>Nu are camere video.</li>
+  <li>Nu identifică persoane.</li>
+  <li>Nu ia decizii automate — doar semnalează unui operator uman.</li>
+</ul>
+
+<h2>Starea actuală a clasificării</h2>
+
+<div class="caseta atentie">
+  <p>
+    Sistemul include un clasificator de sunete care rulează pe serverul local.
+    Pe datele colectate până acum, acesta <b>nu separă fiabil</b> clasele vizate:
+    măsurat cu două modele independente, performanța este apropiată de cea a unei
+    alegeri la întâmplare.
+  </p>
+  <p>
+    Preferăm să spunem asta explicit decât să prezentăm sistemul ca făcând mai mult
+    decât face. Detecția de eveniment sonor puternic funcționează și este măsurată.
+    Identificarea tipului de sunet este, deocamdată, muncă în curs.
+  </p>
+</div>
+
+<h2>Contact</h2>
+
+<table>
+  <tr><th>Autor</th><td>{{ camp(L.operator) }}</td></tr>
+  <tr><th>Contact</th><td>{{ camp(L.operator_email) }}</td></tr>
+</table>
+
+<h2>Componente open-source folosite</h2>
+
+<table>
+  <tr><th>Componentă</th><th>Licență</th></tr>
+  <tr><td>Flask, Werkzeug, Jinja2</td><td>BSD-3-Clause</td></tr>
+  <tr><td>Leaflet</td><td>BSD-2-Clause</td></tr>
+  <tr><td>Date de hartă OpenStreetMap</td><td>ODbL</td></tr>
+  <tr><td>SQLite</td><td>domeniu public</td></tr>
+  <tr><td>Arduino ESP32 core</td><td>LGPL-2.1</td></tr>
+</table>
+
+<p>
+  Codul acestui proiect: © {{ L.an_copyright }} {{ camp(L.detinator_drepturi) }},
+  {{ camp(L.licenta_cod) }}.
+</p>
+
+{% endblock %}
