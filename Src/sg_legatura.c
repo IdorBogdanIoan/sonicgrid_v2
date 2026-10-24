@@ -1,0 +1,467 @@
+/* SonicGrid - legatura STM32 -> ESP32. Vezi sg_legatura.h pentru cablare
+   si pentru protocol.
+
+   UART-ul e configurat aici, cu mana, nu din CubeMX. Motivul e practic: .ioc
+   ramane neatins, deci o regenerare din CubeMX nu are cum sa strice nici
+   ceasurile, nici fisierul asta. (PLL2 s-a stricat exact asa odata.) */
+
+#include "sg_legatura.h"
+
+#include <stddef.h>   /* NULL */
+
+#include "main.h"
+
+/* ------------------------------------------------------------------ pinii */
+
+/* Care UART duce catre ESP. Doua variante, fiindca cele doua perechi de pini
+   sunt pe conectoare diferite si inscriptionate diferit pe placa.
+
+   1 = USART2 pe PD5 si PD6.
+       Pe CN9, inscriptionate D53 (TX) si D52 (RX). Simple, pe VDD.
+
+   2 = LPUART1 pe PG7 si PG8.
+       Pe CN10, inscriptionate D1 TX si D0 RX, adica pinii de UART standard
+       Arduino, mult mai usor de gasit pe placa. Dar PG2..PG15 sunt alimentati
+       din VDDIO2, care trebuie activat din software, altfel pinii sunt morti
+       si nu da nicio eroare. De asta varianta asta cheama
+       HAL_PWREx_EnableVddIO2. Pe placa, VDDIO2 vine din VDD_MCU sau din 3V3
+       fix, selectat prin puntile SB28 si SB29. */
+#define SG_LEG_UART         2
+
+#if SG_LEG_UART == 1
+#define LEG_UART            USART2
+#define LEG_UART_AF         GPIO_AF7_USART2
+#define LEG_PORT_UART       GPIOD
+#define LEG_PIN_TX          GPIO_PIN_5
+#define LEG_PIN_RX          GPIO_PIN_6
+#define LEG_UART_CLK_EN()   __HAL_RCC_USART2_CLK_ENABLE()
+#define LEG_NUME_UART       "USART2 pe PD5/PD6 (D53/D52 pe CN9)"
+#elif SG_LEG_UART == 2
+#define LEG_UART            LPUART1
+#define LEG_UART_AF         GPIO_AF8_LPUART1
+#define LEG_PORT_UART       GPIOG
+#define LEG_PIN_TX          GPIO_PIN_7
+#define LEG_PIN_RX          GPIO_PIN_8
+#define LEG_UART_CLK_EN()   __HAL_RCC_LPUART1_CLK_ENABLE()
+#define LEG_NUME_UART       "LPUART1 pe PG7/PG8 (D1/D0 pe CN10)"
+#define LEG_CERE_VDDIO2     1
+#else
+#error "SG_LEG_UART trebuie 1 sau 2"
+#endif
+
+/* Pinul de trezire. Doua variante, din acelasi motiv ca la UART: unde e mai
+   usor de gasit pe placa.
+
+   2 = PF15, pe CN10, inscriptionat D2. Langa D0 si D1, deci toate trei firele
+       de semnal sunt pe acelasi conector, cu etichete de o cifra.
+
+   1 = PG0, pe CN9, inscriptionat D65. Ultimul pin al conectorului, pe randul
+       care incepe cu A0..A5. Greu de gasit, de asta nu mai e implicit.
+
+   Amandoi sunt pe VDD, nu pe VDDIO2, deci nu depind de HAL_PWREx_EnableVddIO2.
+   Un pin din PG2 in sus ar fi depins, si ar fi tacut fara nicio eroare. */
+#define SG_LEG_WAKE         2
+
+#if SG_LEG_WAKE == 1
+#define LEG_PORT_WAKE       GPIOG
+#define LEG_PIN_WAKE        GPIO_PIN_0
+#define LEG_WAKE_CLK_EN()   __HAL_RCC_GPIOG_CLK_ENABLE()
+#define LEG_NUME_WAKE       "PG0 (D65 pe CN9)"
+#elif SG_LEG_WAKE == 2
+#define LEG_PORT_WAKE       GPIOF
+#define LEG_PIN_WAKE        GPIO_PIN_15
+#define LEG_WAKE_CLK_EN()   __HAL_RCC_GPIOF_CLK_ENABLE()
+#define LEG_NUME_WAKE       "PF15 (D2 pe CN10)"
+#else
+#error "SG_LEG_WAKE trebuie 1 sau 2"
+#endif
+
+/* ------------------------------------------------------------------- stare */
+
+static UART_HandleTypeDef h_leg;
+
+typedef enum
+{
+  LEG_REPAUS = 0,
+  LEG_TRIMITE        /* pinul de trezire e sus, retrimit pana primesc ack */
+} leg_stare_t;
+
+static leg_stare_t s_stare = LEG_REPAUS;
+
+static uint16_t s_secventa   = 0u;
+static uint32_t s_t_detectie = 0u;   /* cand s-a intamplat evenimentul */
+static uint32_t s_t_ultim    = 0u;   /* cand am trimis ultima data */
+static uint8_t  s_clasa      = 0u;
+static uint8_t  s_incredere  = 0u;
+static int8_t   s_dbfs       = -90;
+static uint8_t  s_contrast   = 0u;
+
+/* Varfurile de la ultimul status incoace. Nivelul instantaneu nu spune nimic:
+   poarta ruleaza la 50 Hz, status-ul pleaca o data pe minut. */
+static float    s_varf_db    = -200.0f;
+static float    s_varf_dif   = 0.0f;
+static uint8_t  s_ctx_clasa  = 0u;
+static uint8_t  s_ctx_conf   = 0u;
+
+/* Procentele pe clasa. s_proc e instantaneul luat la declansarea unui
+   eveniment; s_ctx_proc e varful pe clasa de la ultimul status incoace. */
+static uint8_t  s_proc[SG_LEG_NR_CLASE];
+static uint8_t  s_ctx_proc[SG_LEG_NR_CLASE];
+
+static uint32_t s_trimise    = 0u;
+static uint32_t s_confirmate = 0u;
+static uint32_t s_cereri     = 0u;
+
+/* ------------------------------------------------------------------ ajutor */
+
+static uint8_t crc8(const uint8_t *d, uint32_t n)
+{
+  uint8_t c = 0x00u;
+  for (uint32_t i = 0u; i < n; i++)
+  {
+    c ^= d[i];
+    for (int b = 0; b < 8; b++)
+    {
+      c = ((c & 0x80u) != 0u) ? (uint8_t)((uint8_t)(c << 1) ^ 0x07u)
+                              : (uint8_t)(c << 1);
+    }
+  }
+  return c;
+}
+
+static int8_t la_int8_db(float db)
+{
+  if (db < -128.0f) { return -128; }
+  if (db >  127.0f) { return  127; }
+  return (int8_t)db;
+}
+
+/* 0..1 -> 0..100. Rotunjim, ca 0.999 sa dea 100 si nu 99. */
+static uint8_t la_procent(float v)
+{
+  if (v <= 0.0f) { return 0u; }
+  if (v >= 1.0f) { return 100u; }
+  return (uint8_t)(v * 100.0f + 0.5f);
+}
+
+static void copiaza_proc(uint8_t *dest, const float *prob)
+{
+  for (uint32_t k = 0u; k < SG_LEG_NR_CLASE; k++)
+  {
+    dest[k] = (prob != NULL) ? la_procent(prob[k]) : 0u;
+  }
+}
+
+static uint8_t la_uint8(float v)
+{
+  if (v < 0.0f)   { return 0u; }
+  if (v > 255.0f) { return 255u; }
+  return (uint8_t)v;
+}
+
+static void wake_sus(void)
+{
+  HAL_GPIO_WritePin(LEG_PORT_WAKE, LEG_PIN_WAKE, GPIO_PIN_SET);
+}
+
+static void wake_jos(void)
+{
+  HAL_GPIO_WritePin(LEG_PORT_WAKE, LEG_PIN_WAKE, GPIO_PIN_RESET);
+}
+
+/* Citire neblocanta: -1 daca nu e nimic in registru. HAL_UART_Receive cu
+   timeout 0 ar merge si el, dar face un drum lung pentru un singur octet. */
+static int citeste_octet(void)
+{
+  if ((h_leg.Instance->ISR & USART_ISR_RXNE_RXFNE) != 0u)
+  {
+    return (int)(h_leg.Instance->RDR & 0xFFu);
+  }
+  return -1;
+}
+
+static void trimite_cadru(uint8_t tip, uint8_t clasa, uint8_t incredere,
+                          int8_t dbfs, uint8_t contrast, uint16_t varsta_ms,
+                          const uint8_t *proc)
+{
+  uint8_t c[SG_LEG_CADRU];
+
+  c[0]  = SG_LEG_MAGIC_1;
+  c[1]  = SG_LEG_MAGIC_2;
+  c[2]  = tip;
+  c[3]  = clasa;
+  c[4]  = incredere;
+  c[5]  = (uint8_t)(s_secventa & 0xFFu);
+  c[6]  = (uint8_t)(s_secventa >> 8);
+  c[7]  = (uint8_t)dbfs;
+  c[8]  = contrast;
+  c[9]  = (uint8_t)(varsta_ms & 0xFFu);
+  c[10] = (uint8_t)(varsta_ms >> 8);
+  for (uint32_t k = 0u; k < SG_LEG_NR_CLASE; k++)
+  {
+    c[11u + k] = (proc != NULL) ? proc[k] : 0u;
+  }
+  c[SG_LEG_CADRU - 1u] = crc8(c, SG_LEG_CADRU - 1u);
+
+  /* 18 octeti la 115200 = 1.6 ms. Blocant, dar sub o jumatate de cadru mel
+     (20 ms), deci nu ratam nimic din audio. */
+  (void)HAL_UART_Transmit(&h_leg, c, SG_LEG_CADRU, 20u);
+  s_trimise++;
+}
+
+/* -------------------------------------------------------------------- init */
+
+void sg_leg_init(void)
+{
+  GPIO_InitTypeDef g = {0};
+
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
+  LEG_WAKE_CLK_EN();
+  LEG_UART_CLK_EN();
+
+#ifdef LEG_CERE_VDDIO2
+  /* PG2..PG15 sunt alimentati din VDDIO2, iar alimentarea aia porneste din
+     software. Fara linia asta, PG7 si PG8 nu scot nimic si nu apare nicio
+     eroare: UART-ul se initializeaza perfect si transmite in gol.
+     PG0, pinul de trezire, e pe VDD si nu depinde de asta. */
+  HAL_PWREx_EnableVddIO2();
+#endif
+
+  /* Pinul de trezire. Jos in repaus: ESP-ul are pulldown pe partea lui, deci
+     daca firul se rupe sau placa asta e nealimentata, ESP-ul nu se trezeste
+     la nesfarsit pe o linie in aer. */
+  g.Pin   = LEG_PIN_WAKE;
+  g.Mode  = GPIO_MODE_OUTPUT_PP;
+  g.Pull  = GPIO_NOPULL;
+  g.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LEG_PORT_WAKE, &g);
+  wake_jos();
+
+  /* UART. Pull-up pe amandoua: linia in repaus a unui UART e sus, iar cat
+     timp ESP-ul e in somn pinul lui de TX e in aer. Fara pull-up, STM32 ar
+     citi zgomot si ar vedea octeti inexistenti. */
+  g.Pin       = LEG_PIN_TX | LEG_PIN_RX;
+  g.Mode      = GPIO_MODE_AF_PP;
+  g.Pull      = GPIO_PULLUP;
+  g.Speed     = GPIO_SPEED_FREQ_LOW;
+  g.Alternate = LEG_UART_AF;
+  HAL_GPIO_Init(LEG_PORT_UART, &g);
+
+  h_leg.Instance                    = LEG_UART;
+  h_leg.Init.BaudRate               = 115200u;
+  h_leg.Init.WordLength             = UART_WORDLENGTH_8B;
+  h_leg.Init.StopBits               = UART_STOPBITS_1;
+  h_leg.Init.Parity                 = UART_PARITY_NONE;
+  h_leg.Init.Mode                   = UART_MODE_TX_RX;
+  h_leg.Init.HwFlowCtl              = UART_HWCONTROL_NONE;
+  h_leg.Init.OverSampling           = UART_OVERSAMPLING_16;
+  h_leg.Init.OneBitSampling         = UART_ONE_BIT_SAMPLE_DISABLE;
+  h_leg.Init.ClockPrescaler         = UART_PRESCALER_DIV1;
+  h_leg.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+  if (HAL_UART_Init(&h_leg) != HAL_OK)
+  {
+    printf("EROARE: %s nu a pornit, legatura cu ESP e moarta\r\n",
+           LEG_NUME_UART);
+    return;
+  }
+
+  /* Ceasul periferic si divizorul calculat. Daca ceasul iese 0, UART-ul nu
+     are sursa de ceas si nu transmite nimic, desi HAL_UART_Init intoarce OK.
+     Pe LPUART1 divizorul e 256*fck/baud si trebuie intre 0x300 si 0xFFFFF;
+     pe un USART normal e fck/baud. Daca BRR iese in afara, baudul e gresit si
+     ESP-ul vede doar gunoi. */
+  {
+#if SG_LEG_UART == 1
+    const uint32_t fck = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_USART2);
+#else
+    const uint32_t fck = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_LPUART1);
+#endif
+    printf("  ceas periferic %lu Hz, BRR 0x%lX\r\n",
+           (unsigned long)fck, (unsigned long)h_leg.Instance->BRR);
+    if (fck == 0u)
+    {
+      printf("  ATENTIE: ceas 0, UART-ul nu are sursa de ceas\r\n");
+    }
+  }
+
+  s_stare = LEG_REPAUS;
+  printf("Legatura ESP: %s, 115200 | trezire pe %s\r\n",
+         LEG_NUME_UART, LEG_NUME_WAKE);
+}
+
+/* ------------------------------------------------------------- interfata */
+
+bool sg_leg_eveniment(uint8_t clasa, uint8_t incredere,
+                      float dbfs, float contrast_db, const float *prob)
+{
+  if (s_stare != LEG_REPAUS)
+  {
+    return false;
+  }
+
+  s_secventa++;
+  copiaza_proc(s_proc, prob);
+  s_clasa      = clasa;
+  s_incredere  = (incredere > 100u) ? 100u : incredere;
+  s_dbfs       = la_int8_db(dbfs);
+  s_contrast   = la_uint8(contrast_db);
+  s_t_detectie = HAL_GetTick();
+  s_t_ultim    = s_t_detectie - SG_LEG_PAS_MS;   /* trimite la primul tick */
+  s_stare      = LEG_TRIMITE;
+
+  wake_sus();
+  return true;
+}
+
+void sg_leg_nivel(float dbfs, float contrast_db)
+{
+  if (dbfs > s_varf_db)        { s_varf_db  = dbfs; }
+  if (contrast_db > s_varf_dif) { s_varf_dif = contrast_db; }
+}
+
+void sg_leg_context(uint8_t clasa, uint8_t incredere, const float *prob)
+{
+  /* Pastram INSTANTANEUL de la rularea cea mai convingatoare, nu varful pe
+     fiecare clasa separat.
+
+     Prima versiune tinea un maxim independent per clasa. Suna rezonabil, dar
+     modelul ruleaza de doua ori pe secunda iar status-ul pleaca o data pe
+     minut, deci se aduna 120 de rulari. Orice clasa atinge o valoare mare
+     macar o data in 120 de incercari, asa ca toate sase ieseau aproape pline,
+     indiferent ce se auzea. Masurat pe un nod real, in camera linistita:
+     84/95/55/55/98/91.
+
+     Si e gresit si conceptual: sase maxime culese din sase momente diferite nu
+     descriu niciun sunet care chiar s-a intamplat. Un instantaneu da.
+
+     Momentul ales e cel cu increderea cea mai mare pe clasele urgente, fiindca
+     aia e intrebarea la care raspunde nodul: ce a fost cel mai alarmant lucru
+     din ultimul minut. */
+  if (incredere >= s_ctx_conf)
+  {
+    s_ctx_clasa = clasa;
+    s_ctx_conf  = (incredere > 100u) ? 100u : incredere;
+    copiaza_proc(s_ctx_proc, prob);
+  }
+}
+
+/* Test de bucla locala: scrie un octet si verifica daca se intoarce.
+ *
+ * Se foloseste cu un fir intre D1 TX si D0 RX pe placa, FARA ESP-ul legat, si
+ * separa clar cele doua jumatati ale problemei:
+ *
+ *   trece  -> UART-ul, pinii si ceasul sunt in regula, deci problema e in
+ *             fire sau pe partea ESP
+ *   cade   -> problema e pe placa: ceas, alternate function, VDDIO2
+ *
+ * Nu se poate rula automat la pornire cu ESP-ul legat, fiindca TX-ul lui tine
+ * linia sus si octetul nu se intoarce. */
+bool sg_leg_test_bucla(void)
+{
+  const uint8_t trimis[3] = { 0x5Au, 0xA5u, 0x3Cu };
+  bool toate = true;
+
+  printf("Test de bucla pe %s (pune un fir intre TX si RX):\r\n",
+         LEG_NUME_UART);
+  for (int i = 0; i < 3; i++)
+  {
+    /* golim ce o fi ramas */
+    while (citeste_octet() >= 0) { }
+
+    (void)HAL_UART_Transmit(&h_leg, &trimis[i], 1u, 20u);
+
+    int b = -1;
+    const uint32_t t0 = HAL_GetTick();
+    while ((b < 0) && ((HAL_GetTick() - t0) < 50u))
+    {
+      b = citeste_octet();
+    }
+    const bool ok = (b == (int)trimis[i]);
+    printf("  0x%02X -> %s", trimis[i],
+           (b < 0) ? "nimic" : (ok ? "primit" : "alt octet"));
+    if ((b >= 0) && !ok) { printf(" (0x%02X)", (unsigned)b); }
+    printf("\r\n");
+    toate = toate && ok;
+  }
+  printf("  VERDICT: %s\r\n", toate ? "UART-ul merge" : "UART-ul NU merge");
+  return toate;
+}
+
+void sg_leg_tick(void)
+{
+  /* Erorile de linie se sterg la fiecare trecere. Dupa un overrun, RXNE nu
+     se mai ridica niciodata, iar legatura ar parea moarta definitiv. */
+  const uint32_t isr = h_leg.Instance->ISR;
+  if ((isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE | USART_ISR_PE)) != 0u)
+  {
+    h_leg.Instance->ICR = USART_ICR_ORECF | USART_ICR_FECF |
+                          USART_ICR_NECF  | USART_ICR_PECF;
+  }
+
+  /* Golim ce a venit. Mai mult de cativa octeti per trecere nu are de unde. */
+  for (int i = 0; i < 8; i++)
+  {
+    const int b = citeste_octet();
+    if (b < 0)
+    {
+      break;
+    }
+
+    if ((uint8_t)b == SG_LEG_CERERE)
+    {
+      /* Cerere de status: raspundem acum, orice altceva ar fi in curs. */
+      s_cereri++;
+      s_secventa++;
+      trimite_cadru(SG_LEG_TIP_STATUS, s_ctx_clasa, s_ctx_conf,
+                    la_int8_db(s_varf_db), la_uint8(s_varf_dif), 0u,
+                    s_ctx_proc);
+      s_varf_db   = -200.0f;
+      s_varf_dif  = 0.0f;
+      s_ctx_clasa = 0u;
+      s_ctx_conf  = 0u;
+      for (uint32_t k = 0u; k < SG_LEG_NR_CLASE; k++) { s_ctx_proc[k] = 0u; }
+    }
+    else if (((uint8_t)b == SG_LEG_ACK) && (s_stare == LEG_TRIMITE))
+    {
+      s_confirmate++;
+      s_stare = LEG_REPAUS;
+      wake_jos();
+    }
+  }
+
+  if (s_stare != LEG_TRIMITE)
+  {
+    return;
+  }
+
+  const uint32_t acum = HAL_GetTick();
+
+  if ((acum - s_t_detectie) >= SG_LEG_RABDARE_MS)
+  {
+    /* ESP-ul nu raspunde. Coboram pinul si continuam: nodul nu are voie sa
+       se blocheze pentru ca radioul e mort. Pierderea se vede in numarul de
+       cadre trimise fata de confirmate. */
+    s_stare = LEG_REPAUS;
+    wake_jos();
+    printf("  legatura ESP: niciun ack in %lu ms (trimise %lu, ack %lu)\r\n",
+           (unsigned long)SG_LEG_RABDARE_MS,
+           (unsigned long)s_trimise, (unsigned long)s_confirmate);
+    return;
+  }
+
+  if ((acum - s_t_ultim) >= SG_LEG_PAS_MS)
+  {
+    s_t_ultim = acum;
+    /* varsta se recalculeaza la fiecare incercare, altfel o retrimitere ar
+       muta momentul evenimentului pe ceasul gateway-ului. */
+    trimite_cadru(SG_LEG_TIP_EVENT, s_clasa, s_incredere, s_dbfs, s_contrast,
+                  (uint16_t)(acum - s_t_detectie), s_proc);
+  }
+}
+
+bool     sg_leg_ocupat(void)      { return s_stare != LEG_REPAUS; }
+uint32_t sg_leg_trimise(void)     { return s_trimise; }
+uint32_t sg_leg_confirmate(void)  { return s_confirmate; }
+uint32_t sg_leg_cereri(void)      { return s_cereri; }

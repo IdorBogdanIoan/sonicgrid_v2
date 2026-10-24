@@ -1,0 +1,826 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "gpdma.h"
+#include "icache.h"
+#include "sai.h"
+#include "gpio.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+
+#include "mel_frontend.h"
+#include "sg_gate.h"
+#include "sg_pcen.h"
+#include "sg_fereastra.h"
+#include "sg_model.h"
+#include "sg_legatura.h"
+#include "sg_prag_adaptiv.h"
+
+
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+/* 512 cuvinte de 32 de biti per jumatate de buffer.
+   Slotul e stereo, deci 512 cuvinte = 256 esantioane pe canalul stang.
+   La 16 kHz asta inseamna un callback la fiecare 16 ms. */
+#define HALF_WORDS   512u
+#define BUF_WORDS    (HALF_WORDS * 2u)
+
+/* INMP441 scoate 24 de biti cu semn, deci scala completa e 2^23. */
+#define FULL_SCALE   8388608.0f
+
+/* Pune pe 1 ca sa intri in modul de sonda, care verifica ce fir ajunge unde.
+   Pune inapoi pe 0 pentru captura audio normala. */
+#define MOD_SONDA    0
+
+/* Cat deplasam esantionul de 32 de biti ca sa obtinem int16.
+   Corect matematic ar fi 16, fiindcă INMP441 pune 24 de biti aliniati la
+   stanga. Folosim 14, adica 12 dB de castig in plus, ca sa reproducem exact
+   ce facea nodul ESP32 (I2S_SHIFT in esp32/main/scream_node.c). Daca schimbi
+   valoarea asta, modelul trebuie recalibrat sau reantrenat. */
+#define PCM_SHIFT    14
+
+/* Pune pe 1 ca sa rulezi clasificatorul pe FIECARE fereastra, nu doar cat
+   timp poarta e deschisa, si sa tiparesti fiecare rezultat.
+
+   Serveste la gasirea pragului: cu poarta inchisa modelul ruleaza de cateva
+   ori pe minut si nu ai din ce sa tragi o concluzie. In modul asta ai o
+   decizie la fiecare jumatate de secunda, deci intr-un minut aduni 120 de
+   masuratori si vezi clar unde sta fondul si unde sar evenimentele.
+
+   Costa 39% din procesor. Pune-l inapoi pe 0 cand ai terminat. */
+#define MOD_CALIBRARE   1
+
+/* Pune pe 1 ca sa testezi UART-ul catre ESP fara ESP.
+ *
+ * Scoti toate firele catre ESP, pui UN SINGUR fir intre pinul de TX si cel de
+ * RX de pe Nucleo, si placa isi scrie siesi trei octeti.
+ *
+ *   trec  -> UART-ul, pinii, ceasul si alimentarea lor sunt in regula,
+ *            deci problema e in cabluri sau pe partea ESP
+ *   cad   -> problema e pe placa, si nu mai pierzi timp cu firele
+ *
+ * Nu merge cu ESP-ul legat: TX-ul lui tine linia sus si octetii nu se intorc.
+ * Pune inapoi pe 0 dupa test. */
+#define MOD_TEST_BUCLA  0
+
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+
+COM_InitTypeDef BspCOMInit;
+
+/* USER CODE BEGIN PV */
+static int32_t audio_buf[BUF_WORDS] __attribute__((aligned(32)));
+
+volatile float    g_dbfs     = -200.0f;  /* nivelul blocului curent */
+volatile float    g_dbfs_max = -200.0f;  /* varful de la ultima afisare */
+volatile uint32_t g_blocuri  = 0u;       /* cate jumatati am procesat */
+volatile uint32_t g_erori    = 0u;       /* erori SAI, tipic overrun */
+volatile int32_t  g_brut     = 0;        /* ultimul esantion brut, slot 0 */
+volatile float    g_dbfs_r   = -200.0f;  /* nivelul slotului 1 */
+volatile int32_t  g_brut_r   = 0;        /* ultimul esantion brut, slot 1 */
+
+/* Semnalizare intre intreruperea DMA si bucla principala.
+   Transformata Fourier nu are ce cauta intr-un handler de intrerupere,
+   deci intreruperea doar ridica un steag si bucla face calculul. */
+volatile uint32_t g_jum_gata = 0u;       /* 1 = prima jumatate, 2 = a doua */
+volatile uint32_t g_pierdute = 0u;       /* jumatati ratate de bucla */
+
+static sg_frontend_t g_fe;
+static int16_t  g_pcm[HALF_WORDS / 2u];          /* 256 esantioane pe jumatate */
+static uint8_t  g_mel[4 * SG_N_MELS];            /* loc pentru cateva cadre */
+static uint8_t  g_mel_ultim[SG_N_MELS];
+static uint32_t g_cadre_mel = 0u;
+static sg_gate_t     g_poarta;
+static sg_pcen_t     g_pcen;
+static sg_fereastra_t g_fer;
+
+/* Un cadru normalizat, si fereastra completa in formatul de intrare al retelei.
+   40 x 50 x 4 octeti = 8 kB, asezata ca (1, 1, n_mels, T). */
+static float g_cadru_pcen[SG_N_MELS];
+static float g_intrare_model[SG_N_MELS * SG_WIN_CADRE];
+static uint32_t g_decizii = 0u;
+
+/* Butonul USER trimite un eveniment de test catre ESP.
+ *
+ * Fara el, legatura nu se poate verifica decat asteptand o alarma adevarata,
+ * iar pana ajunge modelul nou pe placa nu vine niciuna: modelul de acum nu a
+ * trecut niciodata de 23 la suta, iar pragurile de baza sunt la 80 si 90.
+ *
+ * Steagul se ridica in intrerupere si se trateaza in bucla. sg_leg_eveniment
+ * trimite pe UART, deci nu are ce cauta intr-un handler. */
+volatile uint32_t g_test_esp = 0u;
+
+/* Decizia finala: cerem doua ferestre consecutive peste prag, si tacem
+   cinci secunde dupa o alarma ca sa nu trimitem o rafala pentru acelasi
+   eveniment. */
+#define SG_ALARMA_CADRE   2u
+#define SG_REFRACTAR_MS   5000u
+
+/* Clasele care trezesc ESP-ul. grup si trafic nu sunt urgente, sunt
+   context (e lume, e trafic): pe o strada ar declansa la fiecare cateva
+   secunde si ar goli bateria nodului degeaba. Ele pleaca doar in cadrul
+   de status, o data pe minut, ca clasa dominanta. */
+#define SG_LEG_URGENTE  ((1u << SG_TIPAT)  | (1u << SG_STICLA) | \
+                         (1u << SG_CLAXON) | (1u << SG_ALARMA))
+
+/* Cadrul catre ESP duce un procent pe clasa. Daca modelul capata sau pierde
+   o clasa, SG_LEG_NR_CLASE din sg_legatura.h trebuie schimbat la fel, altfel
+   ESP-ul citeste procente decalate si CRC-ul tot iese bun. */
+_Static_assert(SG_LEG_NR_CLASE == SG_NR_CLASE,
+               "SG_LEG_NR_CLASE desincronizat cu SG_NR_CLASE");
+
+static float    g_prob[SG_NR_CLASE];        /* ultima rulare */
+static float    g_prob_max[SG_NR_CLASE];    /* varf de la ultima afisare */
+static uint32_t g_peste[SG_NR_CLASE];       /* ferestre consecutive peste prag */
+static uint32_t g_t_alarma[SG_NR_CLASE];    /* cand a fost ultima alarma */
+static uint32_t g_alarme_cls[SG_NR_CLASE];
+static float    g_p_max_tot[SG_NR_CLASE];   /* maximul de la pornire, pentru reglat praguri */
+static uint32_t g_alarme   = 0u;
+static bool     g_model_ok = false;
+
+/* Varfurile de la ultima afisare. Poarta ruleaza la 50 Hz, afisajul la 5 Hz,
+   deci valoarea instantanee nu spune nimic despre ce a vazut poarta. */
+static float g_dif_max  = -999.0f;
+static float g_niv_max  = -999.0f;
+
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void SystemPower_Config(void);
+/* USER CODE BEGIN PFP */
+static void proceseaza(const int32_t *p, uint32_t cuvinte);
+void BSP_PB_Callback(Button_TypeDef Button);
+#if MOD_SONDA
+static void sonda(void);
+#endif
+
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+/* Chemat din BSP_PB_IRQHandler, deci din intrerupere: doar ridicam steagul. */
+void BSP_PB_Callback(Button_TypeDef Button)
+{
+  if (Button == BUTTON_USER)
+  {
+    g_test_esp = 1u;
+  }
+}
+
+/* Calculeaza RMS-ul pe ambele sloturi si il converteste in dBFS.
+
+   Bufferul contine perechi slot0/slot1, de aceea pasul e 2.
+   Masuram amandoua ca sa vedem imediat in care intra sunetul:
+   cu L/R la masa microfonul vorbeste pe slot 0, cu L/R la 3V3 pe slot 1.
+   Daca firul de L/R e in aer, se vede tot aici.
+
+   INMP441 aliniaza cei 24 de biti la stanga intr-un slot de 32,
+   deci deplasarea cu 8 la dreapta da valoarea cu semn corecta. */
+static void proceseaza(const int32_t *p, uint32_t cuvinte)
+{
+  float    acc0 = 0.0f;
+  float    acc1 = 0.0f;
+  uint32_t n    = 0u;
+
+  for (uint32_t i = 0u; (i + 1u) < cuvinte; i += 2u)
+  {
+    int32_t s0 = p[i]      >> 8;
+    int32_t s1 = p[i + 1u] >> 8;
+    acc0 += (float)s0 * (float)s0;
+    acc1 += (float)s1 * (float)s1;
+    n++;
+  }
+  if (n == 0u)
+  {
+    return;
+  }
+
+  g_brut   = p[0] >> 8;
+  g_brut_r = p[1] >> 8;
+
+  float db0 = 20.0f * log10f((sqrtf(acc0 / (float)n) + 1e-6f) / FULL_SCALE);
+  float db1 = 20.0f * log10f((sqrtf(acc1 / (float)n) + 1e-6f) / FULL_SCALE);
+
+  g_dbfs   = db0;
+  g_dbfs_r = db1;
+
+  float cel_mai_tare = (db0 > db1) ? db0 : db1;
+  if (cel_mai_tare > g_dbfs_max)
+  {
+    g_dbfs_max = cel_mai_tare;
+  }
+  g_blocuri++;
+}
+
+#if MOD_SONDA
+/* Mod de sonda, ca sa aflam fara multimetru ce fir ajunge pe ce pin.
+
+   PE4 si PE5 devin iesiri simple care comuta la cateva kHz.
+   PE6 devine intrare cu rezistenta de coborare si numara tranzitiile.
+
+   Cu microfonul scos, iei capatul liber al unui fir deja infipt in placa
+   si il atingi de pinul SD (PE6). Daca firul chiar vine de pe PE4 sau PE5,
+   contorul sare imediat. Daca ramane zero, firul nu e pe pinul crezut. */
+static void sonda(void)
+{
+  GPIO_InitTypeDef gi = {0};
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+
+  gi.Pin   = GPIO_PIN_4 | GPIO_PIN_5;
+  gi.Mode  = GPIO_MODE_OUTPUT_PP;
+  gi.Pull  = GPIO_NOPULL;
+  gi.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOE, &gi);
+
+  gi.Pin   = GPIO_PIN_6;
+  gi.Mode  = GPIO_MODE_INPUT;
+  gi.Pull  = GPIO_PULLDOWN;
+  gi.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &gi);
+
+  printf("\r\n=== MOD SONDA ===\r\n");
+  printf("PE4 si PE5 comuta. PE6 e intrare si numara tranzitiile.\r\n");
+  printf("Scoate microfonul. Atinge capatul liber al unui fir de pinul SD.\r\n");
+  printf("Contor mare = firul vine de pe PE4 sau PE5. Contor zero = nu.\r\n\r\n");
+
+  uint32_t t     = HAL_GetTick();
+  uint32_t tranz = 0u;
+  GPIO_PinState ant = GPIO_PIN_RESET;
+
+  for (;;)
+  {
+    HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_4 | GPIO_PIN_5);
+    for (volatile uint32_t d = 0u; d < 400u; d++) { __NOP(); }
+
+    GPIO_PinState acum = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_6);
+    if (acum != ant) { tranz++; ant = acum; }
+
+    if ((HAL_GetTick() - t) >= 200u)
+    {
+      t = HAL_GetTick();
+      printf("PE6 %s   tranzitii %6lu\r\n",
+             (tranz > 10u) ? "SEMNAL" : "mort  ", tranz);
+      tranz = 0u;
+      BSP_LED_Toggle(LED_GREEN);
+    }
+  }
+}
+#endif
+
+/* Converteste un cuvant SAI de 32 de biti la int16 cu saturare.
+
+   Varianta de pe ESP facea doar un cast, care la sunete puternice se
+   rasuceste: o valoare pozitiva mare devine negativa mare, si tocmai
+   tipetele ar fi aratat ca zgomot. Taiem curat in schimb. */
+static inline int16_t la_int16(int32_t brut)
+{
+  int32_t v = brut >> PCM_SHIFT;
+  if (v >  32767) { v =  32767; }
+  if (v < -32768) { v = -32768; }
+  return (int16_t)v;
+}
+
+/* Deseneaza un cadru mel ca o coloana de spectrograma in terminal.
+   Fiecare caracter e o banda, de la 200 Hz in stanga la 6 kHz in dreapta. */
+static void deseneaza_mel(const uint8_t *m)
+{
+  static const char ramp[] = " .:-=+*#%@";
+  char linie[SG_N_MELS + 1];
+
+  for (int i = 0; i < SG_N_MELS; i++)
+  {
+    /* Radical in loc de liniar: altfel o camera linistita apare complet goala,
+       fiindca energia reala sta in treimea de jos a domeniului. */
+    int idx = (int)(9.0f * sqrtf((float)m[i] / 255.0f) + 0.5f);
+    if (idx < 0) { idx = 0; }
+    if (idx > 9) { idx = 9; }
+    linie[i] = ramp[idx];
+  }
+  linie[SG_N_MELS] = '\0';
+  printf("[%s]", linie);
+}
+
+/* Prima jumatate s-a umplut, o procesam cat se umple a doua. */
+void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    proceseaza(&audio_buf[0], HALF_WORDS);
+    if (g_jum_gata != 0u) { g_pierdute++; }
+    g_jum_gata = 1u;
+  }
+}
+
+/* A doua jumatate s-a umplut, DMA-ul s-a intors deja la inceput. */
+void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    proceseaza(&audio_buf[HALF_WORDS], HALF_WORDS);
+    if (g_jum_gata != 0u) { g_pierdute++; }
+    g_jum_gata = 2u;
+  }
+}
+
+/* Daca numarul asta creste, SAI-ul pierde esantioane. */
+void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai)
+{
+  (void)hsai;
+  g_erori++;
+}
+
+
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the System Power */
+  SystemPower_Config();
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_GPDMA1_Init();
+  MX_ICACHE_Init();
+  MX_SAI1_Init();
+  /* USER CODE BEGIN 2 */
+
+  /* USER CODE END 2 */
+
+  /* Initialize leds */
+  BSP_LED_Init(LED_GREEN);
+  BSP_LED_Init(LED_BLUE);
+  BSP_LED_Init(LED_RED);
+
+  /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
+  BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
+
+  /* Initialize COM1 port (115200, 8 bits (7-bit data + 1 stop bit), no parity */
+  BspCOMInit.BaudRate   = 115200;
+  BspCOMInit.WordLength = COM_WORDLENGTH_8B;
+  BspCOMInit.StopBits   = COM_STOPBITS_1;
+  BspCOMInit.Parity     = COM_PARITY_NONE;
+  BspCOMInit.HwFlowCtl  = COM_HWCONTROL_NONE;
+  if (BSP_COM_Init(COM1, &BspCOMInit) != BSP_ERROR_NONE)
+  {
+    Error_Handler();
+  }
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  BSP_COM_SelectLogPort(COM1);
+
+#if MOD_SONDA
+  sonda();
+#endif
+
+  printf("\r\n=== SonicGrid, nod STM32U5A5 ===\r\n");
+  printf("SAI1: 16 kHz, 32 biti, 2 sloturi, I2S standard\r\n");
+  printf("SYSCLK: %lu Hz\r\n", HAL_RCC_GetSysClockFreq());
+  printf("Frontend: %d mel, cadru %d, pas %d, %d..%d Hz\r\n",
+         SG_N_MELS, SG_FRAME_LEN, SG_HOP_LEN, 200, 6000);
+  sg_frontend_init(&g_fe);
+  sg_gate_init(&g_poarta);
+  sg_pcen_init(&g_pcen);
+  sg_fer_init(&g_fer);
+  g_model_ok = sg_model_init();
+
+  printf("Model: %s, %d clase, decizie la %d ms\r\n",
+         g_model_ok ? "incarcat" : "EROARE LA INITIALIZARE",
+         SG_NR_CLASE, SG_WIN_PAS * 20);
+
+  sg_pa_init();
+  sg_leg_init();
+
+#if MOD_TEST_BUCLA
+  sg_leg_test_bucla();
+  printf("\r\nMOD_TEST_BUCLA e 1, deci nu pornesc captura.\r\n"
+         "Pune-l inapoi pe 0 dupa ce ai raspunsul.\r\n");
+  while (1) { HAL_Delay(1000); BSP_LED_Toggle(LED_BLUE); }
+#endif
+
+  if (HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)audio_buf, BUF_WORDS) != HAL_OK)
+  {
+    printf("EROARE: HAL_SAI_Receive_DMA a esuat\r\n");
+    Error_Handler();
+  }
+  printf("Captura pornita. Bate din palme langa microfon.\r\n\r\n");
+
+  uint32_t t_ultim = HAL_GetTick();
+  uint32_t t_praguri = HAL_GetTick();
+
+  while (1)
+  {
+
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+
+    /* O jumatate de buffer e gata: o convertim la int16 si o dam frontendului. */
+    const uint32_t jum = g_jum_gata;
+    if (jum != 0u)
+    {
+      g_jum_gata = 0u;
+
+      const int32_t *p = &audio_buf[(jum == 1u) ? 0u : HALF_WORDS];
+
+      /* SAI livreaza 24 de biti aliniati la stanga intr-un slot de 32.
+         Deplasarea cu 16 da direct int16, formatul asteptat de frontend.
+         Pasul e 2 fiindca slotul 1 e tacut, microfonul vorbeste doar pe 0. */
+      for (uint32_t i = 0u, k = 0u; i < HALF_WORDS; i += 2u, k++)
+      {
+        g_pcm[k] = la_int16(p[i]);
+      }
+
+      const int nc = sg_frontend_process(&g_fe, g_pcm, (int)(HALF_WORDS / 2u), g_mel);
+      for (int c = 0; c < nc; c++)
+      {
+        const uint8_t *cadru = g_mel + c * SG_N_MELS;
+
+        /* PCEN ruleaza pe FIECARE cadru, si cand poarta e inchisa.
+           Are stare, iar fondul neted trebuie sa fie actualizat in momentul
+           in care apare evenimentul. Daca l-am porni abia la declansare,
+           ar normaliza dupa un fond vechi de cateva secunde. */
+        sg_pcen_push(&g_pcen, cadru, g_cadru_pcen);
+        sg_fer_push(&g_fer, g_cadru_pcen);
+
+        const bool deschisa = sg_gate_push(&g_poarta, cadru);
+
+        const float d = sg_gate_contrast_db(&g_poarta);
+        const float v = sg_gate_nivel_db(&g_poarta);
+        if (d > g_dif_max) { g_dif_max = d; }
+        if (v > g_niv_max) { g_niv_max = v; }
+
+        /* Varfurile pe care le va duce heartbeat-ul catre server. */
+        sg_leg_nivel(g_dbfs, d);
+
+        if (g_poarta.front)
+        {
+          BSP_LED_On(LED_RED);
+        }
+        else if (!deschisa)
+        {
+          BSP_LED_Off(LED_RED);
+        }
+
+        /* In mod normal clasificatorul porneste doar cand poarta e deschisa.
+           In modul de calibrare ruleaza mereu, ca sa adunam statistica. */
+#if MOD_CALIBRARE
+        const bool porneste = sg_fer_gata(&g_fer);
+#else
+        const bool porneste = deschisa && sg_fer_gata(&g_fer);
+#endif
+        if (porneste)
+        {
+          sg_fer_extrage(&g_fer, g_intrare_model);
+          g_decizii++;
+
+          if (g_model_ok)
+          {
+            float p[SG_NR_CLASE];
+            if (sg_model_ruleaza(g_intrare_model, p))
+            {
+              for (int k = 0; k < SG_NR_CLASE; k++)
+              {
+                g_prob[k] = p[k];
+                if (p[k] > g_prob_max[k]) { g_prob_max[k] = p[k]; }
+                if (p[k] > g_p_max_tot[k]) { g_p_max_tot[k] = p[k]; }
+
+                /* Poarta deschisa inseamna ca fereastra asta e una pe care
+                   se ia o decizie, deci e si una care trebuie sa intre in
+                   estimarea pragului. Cu MOD_CALIBRARE 1 modelul ruleaza si cu
+                   poarta inchisa; ferestrele alea nu intra, altfel distributia
+                   ar fi a linistii, nu a deciziilor. */
+                if (deschisa)
+                {
+                  sg_pa_actualizeaza(k, p[k]);
+                }
+
+                /* Numai clasele urgente trec prin logica de alarma.
+                   grup si trafic raman in model si in afisaj, dar nu mai iau
+                   nicio decizie.
+
+                   Masurat pe nod: trafic sta in medie la 32 si nu coboara
+                   niciodata sub 9, fiindca 31.4% din exemplele de antrenare
+                   erau trafic si o fereastra de o secunda de zgomot de fond
+                   chiar arata ca trafic indepartat. Cu pragul la 50 trecea in
+                   16% din decizii si tiparea ALARMA degeaba.
+
+                   Am incercat si varianta cu patru clase, reantrenata: media
+                   AUC pe cele patru a scazut de la 0.814 la 0.804, fiindca
+                   cele doua iesiri in plus serveau ca sarcini auxiliare pentru
+                   trunchiul comun. Deci raman in retea. */
+                if (((SG_LEG_URGENTE >> k) & 1u) == 0u)
+                {
+                  g_peste[k] = 0u;
+                  continue;
+                }
+
+                if (p[k] >= sg_pa_curent(k))
+                {
+                  g_peste[k]++;
+                  if (g_peste[k] >= SG_ALARMA_CADRE &&
+                      (HAL_GetTick() - g_t_alarma[k]) >= SG_REFRACTAR_MS)
+                  {
+                    g_alarme++;
+                    g_alarme_cls[k]++;
+                    g_t_alarma[k] = HAL_GetTick();
+                    printf("  >>> ALARMA: %s  %ld%% (prag %ld)  nivel %ld dBFS\r\n",
+                           sg_nume_clase[k], (int32_t)(p[k] * 100.0f),
+                           (int32_t)(sg_pa_curent(k) * 100.0f + 0.5f),
+                           (int32_t)g_dbfs);
+                    if (!sg_leg_eveniment((uint8_t)k,
+                                          (uint8_t)(p[k] * 100.0f),
+                                          g_dbfs,
+                                          sg_gate_contrast_db(&g_poarta),
+                                          p))
+                    {
+                      printf("  legatura ESP ocupata, nu trimit\r\n");
+                    }
+                  }
+                }
+                else
+                {
+                  g_peste[k] = 0u;
+                }
+              }
+
+              /* Clasa dominanta pentru cadrul de status, peste clasele
+                 urgente DOAR.
+
+                 Daca s-ar lua maximul peste toate sase, ar iesi aproape mereu
+                 trafic, fiindca el sta permanent la 32, si telemetria ar
+                 raporta "nodul aude trafic" si intr-o camera goala. */
+              {
+                int kmax = -1;
+                for (int k = 0; k < SG_NR_CLASE; k++)
+                {
+                  if (((SG_LEG_URGENTE >> k) & 1u) == 0u) { continue; }
+                  if (kmax < 0 || p[k] > p[kmax]) { kmax = k; }
+                }
+                if (kmax >= 0)
+                {
+                  sg_leg_context((uint8_t)kmax, (uint8_t)(p[kmax] * 100.0f), p);
+                }
+              }
+
+#if MOD_CALIBRARE
+              printf("   ");
+              for (int k = 0; k < SG_NR_CLASE; k++)
+              {
+                printf(" %s %3ld", sg_nume_clase[k], (int32_t)(p[k] * 100.0f));
+              }
+              printf("   poarta %c  %lums\r\n", deschisa ? 'D' : '.',
+                     sg_model_durata_ms());
+#endif
+            }
+          }
+        }
+      }
+      if (nc > 0)
+      {
+        g_cadre_mel += (uint32_t)nc;
+        memcpy(g_mel_ultim, g_mel + (nc - 1) * SG_N_MELS, SG_N_MELS);
+      }
+    }
+
+    /* Buton apasat: un eveniment de test, ca sa se poata verifica legatura
+       cu ESP-ul fara sa aduci o sticla si un ciocan. */
+    if (g_test_esp != 0u)
+    {
+      g_test_esp = 0u;
+      const bool trimis = sg_leg_eveniment((uint8_t)SG_TIPAT, 99u, g_dbfs,
+                                           sg_gate_contrast_db(&g_poarta),
+                                           g_prob);
+      printf("  buton: eveniment de test catre ESP -> %s\r\n",
+             trimis ? "pornit" : "legatura ocupata");
+    }
+
+    /* Legatura cu ESP-ul: retrimiteri, ack-uri, cereri de status.
+       Nu blocheaza, deci nu pierdem jumatati de buffer. */
+    sg_leg_tick();
+
+    if ((HAL_GetTick() - t_ultim) >= 200u)
+    {
+      t_ultim = HAL_GetTick();
+
+      /* Afisam ca intreg, ca sa nu depindem de printf cu virgula mobila. */
+
+      printf("%4ld dBFS  %s  difMAX %3ld  ev %3lu  fond %2lu  dec %4lu  alarme %3lu | ",
+             (int32_t)g_dbfs,
+             g_poarta.activ ? "DESCHIS" : "inchis ",
+             (int32_t)g_dif_max,
+             g_poarta.evenimente,
+             (unsigned long)g_poarta.fonduri_noi,
+             g_decizii, g_alarme);
+      for (int k = 0; k < SG_NR_CLASE; k++)
+      {
+        printf("%s %3ld/%3ld ", sg_nume_clase[k],
+               (int32_t)(g_prob_max[k] * 100.0f),
+               (int32_t)(g_p_max_tot[k] * 100.0f));
+        g_prob_max[k] = 0.0f;
+      }
+      /* ack-uri / cadre trimise, plus cate cereri de status a facut ESP-ul.
+         Cele trei numere separa cazurile: "0/1 cereri 1" inseamna ca ESP-ul a
+         cerut un status si l-a primit, ceea ce e normal, iar un ack nu se
+         trimite pentru status. "0/1 cereri 0" inseamna un eveniment trimis
+         fara raspuns, adica o problema pe firul de ack. */
+      printf("esp %lu/%lu cereri %lu ",
+             (unsigned long)sg_leg_confirmate(),
+             (unsigned long)sg_leg_trimise(),
+             (unsigned long)sg_leg_cereri());
+      g_dif_max = -999.0f;
+      g_niv_max = -999.0f;
+      deseneaza_mel(g_mel_ultim);
+      printf("\r\n");
+
+      g_dbfs_max = -200.0f;
+      BSP_LED_Toggle(LED_GREEN);
+    }
+
+    /* Pragurile se misca in ore, nu in secunde, deci un raport la 10 s e
+       suficient ca sa vezi daca adaptarea face ce trebuie. */
+    if ((HAL_GetTick() - t_praguri) >= 10000u)
+    {
+      t_praguri = HAL_GetTick();
+      sg_pa_raport();
+    }
+
+  }
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
+  RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_0;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
+  RCC_OscInitStruct.PLL.PLLMBOOST = RCC_PLLMBOOST_DIV4;
+  RCC_OscInitStruct.PLL.PLLM = 3;
+  RCC_OscInitStruct.PLL.PLLN = 10;
+  RCC_OscInitStruct.PLL.PLLP = 8;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 1;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLLVCIRANGE_1;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
+                              |RCC_CLOCKTYPE_PCLK3;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB3CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief Power Configuration
+  * @retval None
+  */
+static void SystemPower_Config(void)
+{
+
+  /*
+   * Disable the internal Pull-Up in Dead Battery pins of UCPD peripheral
+   */
+  HAL_PWREx_DisableUCPDDeadBattery();
+
+  /*
+   * Switch to SMPS regulator instead of LDO
+   */
+  if (HAL_PWREx_ConfigSupply(PWR_SMPS_SUPPLY) != HAL_OK)
+  {
+    Error_Handler();
+  }
+/* USER CODE BEGIN PWR */
+/* USER CODE END PWR */
+}
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @param None
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */

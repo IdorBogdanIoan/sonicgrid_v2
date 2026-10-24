@@ -1,0 +1,86 @@
+#include "sg_model.h"
+
+#include <math.h>
+#include <string.h>
+
+#include "main.h"
+#include "network.h"
+#include "stai.h"
+
+/* Factorii de cuantizare, cititi din raportul ST Edge AI dupa regenerare.
+   ATENTIE: se schimba la fiecare reexport al modelului. Daca nu ii
+   actualizezi, reteaua primeste si scoate numere deplasate. */
+#define SG_Q_IN_SCALA    0.013176696f
+#define SG_Q_IN_ZERO     (-128)
+#define SG_Q_OUT_SCALA   0.052342672f
+#define SG_Q_OUT_ZERO    (104)
+
+const char *const sg_nume_clase[SG_NR_CLASE] = {
+  "tipat", "sticla", "claxon", "alarma", "grup", "trafic"
+};
+
+const float sg_prag[SG_NR_CLASE] = {
+  0.50f,   /* tipat  */
+  0.60f,   /* sticla, mai sus fiindca modelul nu o stapaneste */
+  0.50f,   /* claxon */
+  0.60f,   /* alarma, idem */
+  0.60f,   /* grup, e context nu alarma, deci prag mai mare */
+  0.60f,   /* trafic, idem */
+};
+
+STAI_NETWORK_CONTEXT_DECLARE(s_ctx, STAI_NETWORK_CONTEXT_SIZE)
+
+STAI_ALIGNED(32)
+static uint8_t s_activari[STAI_NETWORK_ACTIVATION_1_SIZE_BYTES];
+static stai_ptr s_lista_activari[] = { s_activari };
+
+static stai_ptr s_intrari[STAI_NETWORK_IN_NUM];
+static stai_ptr s_iesiri[STAI_NETWORK_OUT_NUM];
+static bool     s_gata = false;
+static uint32_t s_durata_ms = 0u;
+
+bool sg_model_init(void)
+{
+  if (stai_runtime_init() != STAI_SUCCESS)                      { return false; }
+  if (stai_network_init(s_ctx) != STAI_SUCCESS)                 { return false; }
+  if (stai_network_set_activations(s_ctx, s_lista_activari,
+        STAI_NETWORK_ACTIVATIONS_NUM) != STAI_SUCCESS)          { return false; }
+
+  stai_size n = 0u;
+  if (stai_network_get_inputs(s_ctx, s_intrari, &n) != STAI_SUCCESS ||
+      n != STAI_NETWORK_IN_NUM)                                 { return false; }
+  if (stai_network_get_outputs(s_ctx, s_iesiri, &n) != STAI_SUCCESS ||
+      n != STAI_NETWORK_OUT_NUM)                                { return false; }
+
+  s_gata = true;
+  return true;
+}
+
+bool sg_model_ruleaza(const float *fereastra, float *probabilitati)
+{
+  if (!s_gata) { return false; }
+
+  int8_t *in = (int8_t *)s_intrari[0];
+  for (int i = 0; i < SG_MODEL_INTRARE; i++)
+  {
+    int32_t q = (int32_t)lrintf(fereastra[i] / SG_Q_IN_SCALA) + SG_Q_IN_ZERO;
+    if (q < -128) { q = -128; }
+    if (q >  127) { q =  127; }
+    in[i] = (int8_t)q;
+  }
+
+  const uint32_t t0 = HAL_GetTick();
+  const stai_return_code rc = stai_network_run(s_ctx, STAI_MODE_SYNC);
+  s_durata_ms = HAL_GetTick() - t0;
+  if (rc != STAI_SUCCESS) { return false; }
+
+  const int8_t *out = (const int8_t *)s_iesiri[0];
+  for (int k = 0; k < SG_NR_CLASE; k++)
+  {
+    const float logit = ((float)out[k] - (float)SG_Q_OUT_ZERO) * SG_Q_OUT_SCALA;
+    probabilitati[k] = 1.0f / (1.0f + expf(-logit));
+  }
+  return true;
+}
+
+uint32_t sg_model_durata_ms(void) { return s_durata_ms; }
