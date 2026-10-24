@@ -31,7 +31,9 @@ NODES_PATH = os.path.join(BASE_DIR, "nodes.json")
 OFFLINE_AFTER = 150.0
 
 # Cat timp ramane o alerta "activa" pe dashboard (nodurile ei evidentiate).
-ALERT_ACTIVE = 30.0
+# Era 30 s: nodul pulsa rosu mult dupa ce sunetul se oprise. Alerta ramane
+# oricum in lista "Ultimele alerte" si in istoric.
+ALERT_ACTIVE = 5.0
 
 # Domeniul dBFS pe care il mapam la 0-100%. -60 dBFS = liniste, 0 dBFS = saturare.
 DB_FLOOR = -60.0
