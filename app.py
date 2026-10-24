@@ -10,6 +10,7 @@ si expune totul pentru dashboard-ul cu harta.
 """
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -68,6 +69,58 @@ PROC_SHORT = ["Tipat", "Sticla", "Claxon", "Alarma", "Grup", "Trafic"]
 # 200 s nu.
 FRESH_FOR = 90.0
 
+# --- Nivelul afisat dupa un eveniment ---
+#
+# Nodul doarme intre heartbeat-uri, deci dupa un eveniment ultimul nivel primit
+# e cel al sunetului puternic, iar urmatorul vine abia peste un minut. Daca il
+# afisam ca "nivel curent", vumetrul ramane blocat sus tot minutul ala.
+#
+# De aceea tinem separat doua lucruri pe fiecare nod:
+#   - fondul: nivelul din ultimul heartbeat
+#   - evenimentul: nivelul si momentul ultimului eveniment
+# si afisam evenimentul ca un varf: sta EVENT_HOLD secunde sus, apoi coboara
+# exponential spre fond, cu constanta EVENT_TAU. Dupa ~3 s e practic la fond.
+# Cand soseste un heartbeat nou, el devine fondul si varful dispare.
+EVENT_HOLD = 0.6
+EVENT_TAU = 1.0
+
+# Procentele pe clasa ale evenimentului raman pe ecran cat coboara varful,
+# apoi revin la cele din ultimul heartbeat. Altfel "Tipat 92%" ramanea afisat
+# ca stare curenta un minut intreg, ca si nivelul.
+EVENT_PROC_S = EVENT_HOLD + 3 * EVENT_TAU
+
+# Cat de departe in urma se uita "peak". Inainte era maximul de la pornirea
+# nodului, deci dupa primul tipat ramanea acolo pana la restart.
+PEAK_WINDOW = 10.0
+
+# Bridge-ul nu spune (inca) daca o citire vine dintr-un heartbeat sau dintr-un
+# eveniment. O recunoastem dupa alerta care o insoteste: acelasi nod, acelasi
+# nivel, la cel mult atatea secunde distanta. Daca bridge-ul trimite campul
+# "tip" ("eveniment" / "heartbeat"), il folosim pe el si ghicitul nu mai e
+# necesar.
+EVENT_MATCH_S = 3.0
+
+# --- Flux live (SSE) ---
+#
+# Dashboard-ul primea datele cerand /api/state o data pe secunda, deci o alerta
+# putea astepta pana la o secunda doar in browser. Pe /api/stream serverul
+# trimite starea imediat ce intra o citire sau o alerta.
+#
+# Fiecare dashboard deschis tine ocupat un fir al lui waitress cat timp e
+# conectat. Implicit waitress are 4 fire, iar firele trebuie sa ramana si
+# pentru bridge, deci limitam numarul de fluxuri la 2. Dashboard-urile care nu
+# mai incap trec singure pe cereri o data pe secunda, ca inainte.
+# Un tab inchis elibereaza locul in cel mult ~10 s (doua ping-uri).
+# Daca waitress ruleaza cu --threads=24 (https3.sh), poti ridica limita:
+#   SONICGRID_SSE_MAX=12 in mediul serviciului.
+SSE_MAX = int(os.environ.get("SONICGRID_SSE_MAX", "2"))
+SSE_PING_S = 5.0          # comentariu gol din cand in cand: tine nginx treaz si
+                          # descopera clientii plecati
+SSE_MAX_AGE_S = 300.0     # dupa atat inchidem fluxul; browserul se reconecteaza
+                          # singur, iar firele blocate de clienti morti se elibereaza
+SSE_COALESCE_S = 0.05     # citirea si alerta aceluiasi eveniment vin la cateva
+                          # ms una de alta: le trimitem intr-un singur mesaj
+
 app = Flask(__name__)
 
 # Login pe tot site-ul. Exceptiile sunt rutele pe care posteaza bridge-ul: ele
@@ -80,6 +133,21 @@ _lock = threading.Lock()
 _latest = {}                  # node_id -> ultima citire
 _alerts = deque(maxlen=200)   # ultimele alerte, cele mai noi la dreapta
 _config = {}                  # continutul nodes.json
+_pending_ev = {}              # node_id -> (db, ts): alerta venita inaintea citirii ei
+
+# Versiunea starii: creste la fiecare citire, alerta sau reset. Fluxurile SSE
+# asteapta pe _cond pana se schimba, apoi trimit starea noua.
+_cond = threading.Condition()
+_ver = 0
+_sse_active = 0
+
+
+def _anunta():
+    """Trezeste fluxurile SSE. Se cheama DUPA ce s-a eliberat _lock."""
+    global _ver
+    with _cond:
+        _ver += 1
+        _cond.notify_all()
 
 
 # --------------------------------------------------------------------------
@@ -177,6 +245,55 @@ def db_to_level(db_value):
     return max(0.0, min(100.0, pct))
 
 
+def eveniment_activ(r):
+    """True cat timp ultimul eveniment al nodului e mai nou decat fondul lui."""
+    if r.get("ev_ts") is None:
+        return False
+    return r.get("base_ts") is None or r["ev_ts"] > r["base_ts"]
+
+
+def db_afisat(r, now):
+    """Nivelul de aratat acum: fondul, sau varful unui eveniment care coboara spre el.
+
+    Aceeasi formula e si in index.html (dbTinta), unde ruleaza la fiecare cadru.
+    Daca o schimbi aici, schimb-o si acolo.
+    """
+    base = r.get("base_db")
+    if not eveniment_activ(r):
+        return base if base is not None else r["db"]
+    if base is None:
+        base = DB_FLOOR                 # nu stim inca fondul: coboram spre liniste
+    t = now - r["ev_ts"] - EVENT_HOLD
+    if t <= 0:
+        return r["ev_db"]
+    return base + (r["ev_db"] - base) * math.exp(-t / EVENT_TAU)
+
+
+def peak_recent(r, now, afisat):
+    """Maximul din ultimele PEAK_WINDOW secunde, dar niciodata sub nivelul afisat."""
+    vals = [v for t, v in r.get("peaks", ()) if now - t <= PEAK_WINDOW]
+    return max(vals + [afisat])
+
+
+def marcheaza_eveniment(r):
+    """Transforma ultima citire a unui nod in eveniment, retroactiv.
+
+    Folosit cand alerta ajunge DUPA citirea ei: citirea a fost luata drept
+    heartbeat si a devenit fond, deci punem la loc fondul de dinainte.
+    """
+    r["ev_db"], r["ev_ts"], r["ev_proc"] = r["db"], r["ts"], r.get("proc")
+    r["base_db"], r["base_ts"] = r.get("prev_base_db"), r.get("prev_base_ts")
+    r["base_proc"] = r.get("prev_base_proc")
+    r["tip"] = "eveniment"
+
+
+def proc_afisat(r, now):
+    """Procentele de aratat acum: ale evenimentului cat timp e proaspat, altfel ale fondului."""
+    if eveniment_activ(r) and now - r["ev_ts"] <= EVENT_PROC_S:
+        return r.get("ev_proc")
+    return r.get("base_proc")
+
+
 def alert_dict(alert_id, ts, cls, nodes):
     return {
         "id": alert_id,
@@ -268,11 +385,45 @@ def ingest():
         "proc": proc_list(data.get("proc")),
     }
 
+    # "eveniment" sau "heartbeat", daca bridge-ul il trimite. Altfel ghicim
+    # dupa alerta care insoteste evenimentul (vezi EVENT_MATCH_S).
+    tip = str(data.get("tip", "")).strip().lower()
+
     with _lock:
-        prev = _latest.get(node_id)
-        # Peak-hold: retinem maximul de cand a pornit nodul.
-        reading["peak_db"] = max(db_value, prev["peak_db"]) if prev else db_value
-        reading["peak_db"] = round(reading["peak_db"], 1)
+        prev = _latest.get(node_id) or {}
+
+        # Starea nodului trece de la o citire la alta: fondul, ultimul
+        # eveniment si citirile recente pentru peak.
+        for k in ("base_db", "base_ts", "base_proc", "ev_db", "ev_ts", "ev_proc"):
+            reading[k] = prev.get(k)
+        peaks = prev.get("peaks") or deque()
+        peaks.append((now, db_value))
+        while peaks and now - peaks[0][0] > PEAK_WINDOW:
+            peaks.popleft()
+        reading["peaks"] = peaks
+
+        # A venit deja alerta pentru citirea asta? (cele doua pleaca din
+        # bridge pe fire separate, deci ordinea nu e garantata)
+        pend = _pending_ev.pop(node_id, None)
+        potrivit = (pend is not None and now - pend[1] <= EVENT_MATCH_S
+                    and abs(pend[0] - db_value) < 0.05)
+
+        if tip == "eveniment" or (tip != "heartbeat" and potrivit):
+            reading["ev_db"], reading["ev_ts"] = db_value, now
+            reading["ev_proc"] = reading["proc"]
+            for k in ("prev_base_db", "prev_base_ts", "prev_base_proc"):
+                reading[k] = prev.get(k)
+            reading["tip"] = "eveniment"
+        else:
+            reading["prev_base_db"] = reading["base_db"]
+            reading["prev_base_ts"] = reading["base_ts"]
+            reading["prev_base_proc"] = reading["base_proc"]
+            reading["base_db"], reading["base_ts"] = db_value, now
+            reading["base_proc"] = reading["proc"]
+            reading["tip"] = "nivel"
+
+        # Peak pe ultimele PEAK_WINDOW secunde, nu de la pornirea nodului.
+        reading["peak_db"] = round(max(v for _, v in peaks), 1)
         _latest[node_id] = reading
 
         db().execute(
@@ -283,6 +434,7 @@ def ingest():
         )
         db().commit()
 
+    _anunta()
     return jsonify(ok=True, level=reading["level"])
 
 
@@ -329,6 +481,18 @@ def alert():
         a = alert_dict(cur.lastrowid, now, cls, nodes)
         _alerts.append(a)
 
+        # Nivelul din alerta e al unui eveniment, nu fondul nodului. Daca
+        # citirea lui a ajuns deja, o reclasificam; daca nu, o asteptam.
+        for n in nodes:
+            nid = n["node_id"]
+            last = _latest.get(nid)
+            if last and now - last["ts"] <= EVENT_MATCH_S and abs(last["db"] - n["db"]) < 0.05:
+                if last.get("tip") != "eveniment":
+                    marcheaza_eveniment(last)
+            else:
+                _pending_ev[nid] = (n["db"], now)
+
+    _anunta()
     print(f"ALERTA #{a['id']}: {a['cls_name']} - {', '.join(a['node_ids'])}")
     return jsonify(ok=True, id=a["id"])
 
@@ -349,6 +513,17 @@ def alerts():
 @app.route("/api/state")
 def state():
     """Starea curenta a tuturor nodurilor, pentru dashboard."""
+    return jsonify(stare_curenta())
+
+
+# Parametrii animatiei, trimisi la dashboard ca sa nu fie scrisi de doua ori.
+ANIM = {"event_hold": EVENT_HOLD, "event_tau": EVENT_TAU,
+        "event_proc_s": EVENT_PROC_S,
+        "db_floor": DB_FLOOR, "db_ceil": DB_CEIL}
+
+
+def stare_curenta():
+    """Tot ce deseneaza dashboard-ul, ca dict. Folosit de /api/state si /api/stream."""
     now = time.time()
     out = []
 
@@ -379,16 +554,28 @@ def state():
                              proc=None, fresh=False)
             else:
                 age = now - last["ts"]
+                # db / level = ce se vede acum: fondul, sau varful unui
+                # eveniment care coboara spre fond. Dashboard-ul refa calculul
+                # la fiecare cadru din base_db, ev_db si ev_age.
+                afisat = db_afisat(last, now)
+                ev = eveniment_activ(last)
                 entry.update(
                     online=age <= OFFLINE_AFTER,
-                    db=last["db"],
-                    level=last["level"],
+                    db=round(afisat, 1),
+                    level=round(db_to_level(afisat), 1),
+                    raw_db=last["db"],
+                    base_db=last.get("base_db"),
+                    ev_db=last["ev_db"] if ev else None,
+                    ev_ts=last["ev_ts"] if ev else None,
+                    ev_age=round(now - last["ev_ts"], 3) if ev else None,
                     vf_vf=last["vf_vf"],
-                    peak_db=last["peak_db"],
+                    peak_db=round(peak_recent(last, now, afisat), 1),
                     age=round(age, 1),
                     batt_mv=last["batt_mv"],
                     rssi=last["rssi"],
-                    proc=last.get("proc"),
+                    proc=proc_afisat(last, now),
+                    base_proc=last.get("base_proc"),
+                    ev_proc=last.get("ev_proc") if ev else None,
                     # Nodurile dorm intre heartbeat-uri, deci o citire veche de
                     # un minut e normala, nu o defectiune. fresh spune
                     # dashboard-ului cand sa estompeze barele, ca sa nu pari
@@ -420,9 +607,66 @@ def state():
         "proc_max": proc_max,
     }
 
-    return jsonify(nodes=out, summary=summary, server_time=now,
-                   class_names=PROC_NAMES, class_short=PROC_SHORT,
-                   fresh_for=FRESH_FOR)
+    return dict(nodes=out, summary=summary, server_time=now,
+                class_names=PROC_NAMES, class_short=PROC_SHORT,
+                fresh_for=FRESH_FOR, anim=ANIM)
+
+
+@app.route("/api/stream")
+def stream():
+    """Flux SSE: trimite starea (si ultimele alerte) imediat ce se schimba ceva.
+
+    Fiecare mesaj e un obiect ca cel de la /api/state, plus "alerts" (ultimele
+    10, ca la /api/alerts?limit=10). Cand nu se intampla nimic, trimitem doar
+    un comentariu la SSE_PING_S secunde.
+
+    503 cand sunt deja SSE_MAX fluxuri deschise: dashboard-ul trece atunci pe
+    /api/state o data pe secunda.
+    """
+    global _sse_active
+    with _cond:
+        if _sse_active >= SSE_MAX:
+            return jsonify(ok=False, error="Prea multe fluxuri live deschise."), 503
+        _sse_active += 1
+
+    def mesaj():
+        d = stare_curenta()
+        with _lock:
+            d["alerts"] = list(_alerts)[-10:][::-1]
+        return "data: " + json.dumps(d, separators=(",", ":")) + "\n\n"
+
+    def flux():
+        # Prima linie spune browserului sa se reconecteze dupa 3 s daca pica.
+        yield "retry: 3000\n\n"
+        with _cond:
+            vazut = _ver
+        yield mesaj()
+        sfarsit = time.time() + SSE_MAX_AGE_S
+        while time.time() < sfarsit:
+            with _cond:
+                _cond.wait_for(lambda: _ver != vazut, timeout=SSE_PING_S)
+                v = _ver
+            if v == vazut:
+                yield ": ping\n\n"
+                continue
+            time.sleep(SSE_COALESCE_S)
+            with _cond:
+                vazut = _ver
+            yield mesaj()
+
+    def elibereaza():
+        global _sse_active
+        with _cond:
+            _sse_active -= 1
+
+    r = Response(flux(), mimetype="text/event-stream",
+                 headers={"Cache-Control": "no-cache",
+                          # nginx: nu tine mesajele in buffer
+                          "X-Accel-Buffering": "no"})
+    # call_on_close ruleaza si cand clientul pleaca inainte de primul mesaj,
+    # spre deosebire de un finally in generator, care atunci nu ruleaza deloc.
+    r.call_on_close(elibereaza)
+    return r
 
 
 @app.route("/api/history")
@@ -720,6 +964,8 @@ def reset():
     with _lock:
         _latest.clear()
         _alerts.clear()
+        _pending_ev.clear()
+    _anunta()
     return jsonify(ok=True)
 
 

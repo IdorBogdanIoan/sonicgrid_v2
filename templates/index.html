@@ -193,10 +193,12 @@
     overflow: hidden;
   }
 
+  /* Fara tranzitii CSS pe vumetru: latimea, culoarea si varful le misca bucla
+     din JS la fiecare cadru. O tranzitie CSS peste ea adauga inca ~0.35 s de
+     intarziere, deci vumetrul ramanea mereu in urma sunetului. */
   .meter-fill {
     height: 100%;
     width: 0;
-    transition: width .35s ease-out, background-color .35s;
     -webkit-mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
             mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 6px);
   }
@@ -206,7 +208,6 @@
     top: 0; bottom: 0;
     width: 2px;
     background: var(--ink);
-    transition: left .35s ease-out;
   }
 
   .node-foot {
@@ -356,7 +357,7 @@
 
   /* node-db avea margin-left:auto ca sa se impinga la dreapta. Acum f-cls face
      imbrancirea, deci db-ul doar il urmeaza. */
-  .node-top .node-db { margin-left: 0; }
+  .node-top .node-db { margin-left: 0; white-space: nowrap; flex: none; }
 
   .node-name {
     overflow: hidden;
@@ -454,15 +455,27 @@ let SCURT   = JSON.parse('{{ class_short | tojson }}');
 // aceeasi greutate vizuala.
 const URGENTE = [true, true, true, true, false, false];
 
-// Cat de des cerem starea si alertele. Starea se schimba la fiecare
-// heartbeat, lista de alerte aproape niciodata, deci nu are rost acelasi ritm.
-const PAS_STARE_MS = 1000;
-const PAS_ALERTE_MS = 3000;
+// Datele vin pe /api/stream (SSE): serverul le trimite imediat ce intra o
+// citire sau o alerta. Cererile periodice raman doar ca plasa de siguranta:
+// rar cand fluxul merge, o data pe secunda cand nu (browser vechi, sau
+// serverul are deja prea multe fluxuri deschise si raspunde 503).
+const PAS_CU_FLUX_MS = 5000;
+const PAS_FARA_FLUX_MS = 1000;
+const REINCERC_FLUX_MS = 15000;
 
-// Constanta de timp a netezirii. Nodurile raporteaza o data pe minut, deci
-// fara netezire fiecare cifra sare brusc o data la 60 de secunde si restul
-// timpului pagina pare inghetata. Cu 220 ms, o schimbare aluneca in ~0.7 s.
-const TAU_MS = 220;
+// Netezirea e asimetrica, ca la un vumetru real: urca aproape instant (un
+// tipat trebuie sa se vada in secunda in care se aude) si coboara mai lin, ca
+// ochiul sa apuce sa vada varful.
+const TAU_SUS_MS = 60;
+const TAU_JOS_MS = 260;
+
+// Linia alba de pe vumetru: tine varful 1.5 s, apoi coboara cu 25% pe secunda.
+const PEAK_HOLD_MS = 1500;
+const PEAK_CADE_PE_S = 25;
+
+// Parametrii varfului de eveniment. Vin de la server (ANIM din app.py) cu
+// fiecare raspuns; astea sunt doar valorile pana la primul raspuns.
+let ANIM = { event_hold: 0.6, event_tau: 1.0, db_floor: -60, db_ceil: 0 };
 
 let selected = null;
 let alertList = [];               // ultimele alerte, de la /api/alerts
@@ -507,7 +520,8 @@ const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 // ---------- utilitare ----------
 
-const clampLevel = d => Math.max(0, Math.min(100, (d + 60) / 60 * 100));
+const clampLevel = d => Math.max(0, Math.min(100,
+  (d - ANIM.db_floor) / (ANIM.db_ceil - ANIM.db_floor) * 100));
 const esc = s => String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 const hhmmss = ts => new Date(ts * 1000).toLocaleTimeString('ro-RO',
   { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -561,7 +575,8 @@ function cadru(t) {
   // fara limita totul ar aparea instantaneu la valoarea finala.
   const dt = Math.min(120, t - tCadruAnterior);
   tCadruAnterior = t;
-  const k = 1 - Math.exp(-dt / TAU_MS);
+  const kSus = 1 - Math.exp(-dt / TAU_SUS_MS);
+  const kJos = 1 - Math.exp(-dt / TAU_JOS_MS);
 
   for (const el of animate) {
     const a = el._anim;
@@ -570,13 +585,117 @@ function cadru(t) {
     if (Math.abs(d) < 0.03) {
       if (a.cur !== a.tgt) { a.cur = a.tgt; a.aplica(a.cur); }
     } else {
-      a.cur += d * k;
+      a.cur += d * (d > 0 ? kSus : kJos);
       a.aplica(a.cur);
     }
   }
+  cadruLive(t, dt, kSus, kJos);
   requestAnimationFrame(cadru);
 }
 requestAnimationFrame(cadru);
+
+// ---------- nivel live ----------
+//
+// Nodurile dorm intre heartbeat-uri, deci dupa un eveniment ultimul nivel
+// primit e al sunetului puternic. Inainte il aratam ca nivel curent un minut
+// intreg, pana la urmatorul heartbeat. Acum il aratam ca varf: sta sus
+// ANIM.event_hold secunde, apoi coboara spre ultimul fond cunoscut.
+//
+// Calculul e facut aici la fiecare cadru, nu la fiecare raspuns de la
+// server: serverul trimite doar cand se intampla ceva, iar coborarea trebuie
+// sa se vada si intre doua mesaje.
+
+const live = {};            // node_id -> {base, ev, evKey, evT0, online, alert, cur, peak, peakT, ...}
+let tMarkere = 0;           // ultima actualizare a markerelor (ms)
+let tAntet = 0;             // ultima actualizare a mediei / maximului din antet (ms)
+
+// Aceeasi formula ca db_afisat() din app.py.
+function dbTinta(V, t) {
+  if (!V.online) return null;
+  if (V.ev === null) return V.base;
+  const base = V.base !== null ? V.base : ANIM.db_floor;
+  const s = (t - V.evT0) / 1000 - ANIM.event_hold;
+  if (s <= 0) return V.ev;
+  if (s > ANIM.event_tau * 10) { V.ev = null; return V.base; }   // a ajuns la fond
+  return base + (V.ev - base) * Math.exp(-s / ANIM.event_tau);
+}
+
+// Datele noi de la server pentru un nod. Se cheama doar cand chiar a sosit
+// ceva, nu la redesenarea de fiecare secunda.
+function liveDinServer(n, tPrimire) {
+  const V = live[n.id] || (live[n.id] = {
+    base: null, ev: null, evKey: null, evT0: 0, online: false, alert: false,
+    cur: null, peak: 0, peakT: 0, txt: ''
+  });
+  V.base = n.base_db !== undefined && n.base_db !== null ? n.base_db
+         : (n.db !== undefined ? n.db : null);
+  if (n.ev_db !== undefined && n.ev_db !== null && n.ev_age !== null) {
+    // Acelasi eveniment poate veni in mai multe mesaje: nu repornim coborarea.
+    if (V.evKey !== n.ev_ts) {
+      V.evKey = n.ev_ts;
+      V.ev = n.ev_db;
+      V.evT0 = tPrimire - n.ev_age * 1000;
+    }
+  } else {
+    V.ev = null;
+    V.evKey = null;
+  }
+}
+
+function cadruLive(t, dt, kSus, kJos) {
+  const actMarkere = t - tMarkere > 66;      // ~15 cadre/s ajung pentru harta
+  if (actMarkere) tMarkere = t;
+  const niveluri = [];
+
+  for (const id in live) {
+    const V = live[id], c = cards[id];
+    if (!c) continue;
+    const tgt = dbTinta(V, t);
+
+    if (tgt === null || tgt === undefined) {
+      if (V.cur !== null || V.txt !== 'offline') {
+        V.cur = null; V.peak = 0; V.txt = 'offline';
+        c.db.textContent = 'offline';
+        c.db.style.color = c.dot.style.background = levelColor(null);
+        c.fill.style.width = '0%';
+        c.peak.hidden = true;
+        if (markers[id]) actualizeazaMarker(id, V, null);
+      }
+      continue;
+    }
+
+    if (V.cur === null) V.cur = tgt;
+    else {
+      const d = tgt - V.cur;
+      V.cur = Math.abs(d) < 0.02 ? tgt : V.cur + d * (d > 0 ? kSus : kJos);
+    }
+    const lvl = clampLevel(V.cur);
+    niveluri.push(lvl);
+
+    // linia de varf: tine, apoi cade
+    if (lvl >= V.peak) { V.peak = lvl; V.peakT = t; }
+    else if (t - V.peakT > PEAK_HOLD_MS) V.peak = Math.max(lvl, V.peak - PEAK_CADE_PE_S * dt / 1000);
+
+    const culoare = levelColor(lvl);
+    c.fill.style.width = lvl.toFixed(1) + '%';
+    c.fill.style.background = culoare;
+    c.peak.hidden = false;
+    c.peak.style.left = V.peak.toFixed(1) + '%';
+    const txt = V.cur.toFixed(1) + ' dB';
+    if (txt !== V.txt) { V.txt = txt; c.db.textContent = txt; }
+    c.db.style.color = c.dot.style.background = culoare;
+
+    if (actMarkere && markers[id]) actualizeazaMarker(id, V, lvl);
+  }
+
+  if (t - tAntet > 100) {
+    tAntet = t;
+    document.getElementById('s-avg').textContent = niveluri.length
+      ? Math.round(niveluri.reduce((a, b) => a + b, 0) / niveluri.length) + '%' : '–';
+    document.getElementById('s-max').textContent = niveluri.length
+      ? Math.round(Math.max(...niveluri)) + '%' : '–';
+  }
+}
 
 // ---------- bare de clase ----------
 
@@ -674,30 +793,18 @@ function makeCard(n) {
 }
 
 function updateCard(c, n) {
-  const color = levelColor(n.online ? n.level : null);
+  // Nivelul, vumetrul, varful si culorile le deseneaza cadruLive, la fiecare
+  // cadru. Aici raman doar lucrurile care se schimba o data cu datele.
   c.el.classList.toggle('off', !n.online);
   c.el.classList.toggle('sel', n.id === selected);
   c.el.classList.toggle('alert', !!n.alert);
-  c.dot.style.background = color;
   c.name.textContent = n.name;
   c.badge.hidden = !n.alert;
-  c.db.style.color = color;
-  if (n.online) {
-    aim(c.db, n.db, v => { c.db.textContent = v.toFixed(1) + ' dB'; });
-  } else {
-    delete c.db._anim; animate.delete(c.db);
-    c.db.textContent = 'offline';
-  }
-  aim(c.fill, n.online ? n.level : 0, v => { c.fill.style.width = v + '%'; });
-  c.fill.style.background = color;
-  c.peak.hidden = !n.online || n.peak_db === null;
-  if (n.peak_db !== null) {
-    aim(c.peak, clampLevel(n.peak_db), v => { c.peak.style.left = v + '%'; });
-  }
   c.id.textContent = n.id;
   c.rssi.textContent = n.rssi !== null && n.rssi !== undefined ? n.rssi + ' dBm' : '';
   c.batt.textContent = n.batt_mv ? (n.batt_mv / 1000).toFixed(2) + ' V' : '';
-  c.pk.textContent = n.online ? 'peak ' + n.peak_db.toFixed(1) : '—';
+  // peak = maximul din ultimele 10 s (PEAK_WINDOW din app.py), nu de la pornire
+  c.pk.textContent = n.online && n.peak_db !== null ? 'peak ' + n.peak_db.toFixed(1) : '—';
   c.age.textContent = n.age !== null ? ago(n.age) : '';
 
   // Barele pe clasa ale nodului. Estompate cand citirea nu mai e proaspata:
@@ -728,16 +835,80 @@ function dominanta(proc) {
 function selectNode(id) {
   selected = id;
   lastHistory = 0;                // graficul se reincarca imediat
-  refresh();
+  redeseneaza();
+}
+
+// Ultimul raspuns de la server si momentul cand a sosit. Serverul trimite
+// doar cand se schimba ceva, deci intre doua mesaje redesenam din ele,
+// imbatranind varstele cu timpul trecut (altfel "acum 3 s" ar ramane pe loc,
+// iar o alerta n-ar mai expira de pe ecran).
+let ultimeleDate = null;
+let tUltimeleDate = 0;
+
+function primeste(data) {
+  // Un raspuns la /api/state pornit inainte de un mesaj pe flux poate sosi
+  // dupa el. Nu lasam o stare mai veche sa o inlocuiasca pe una mai noua.
+  if (ultimeleDate && data.server_time < ultimeleDate.server_time) return;
+  ultimeleDate = data;
+  tUltimeleDate = performance.now();
+  if (data.anim) ANIM = data.anim;
+  if (Array.isArray(data.alerts)) alertList = data.alerts;
+  // Ultima alerta vine si in summary; daca lista inca nu o are, o adaugam,
+  // ca banner-ul si lista sa apara in acelasi moment.
+  const la = data.summary && data.summary.latest_alert;
+  if (la && !alertList.some(a => a.id === la.id)) alertList = [la, ...alertList].slice(0, 10);
+  for (const n of data.nodes) liveDinServer(n, tUltimeleDate);
+  redeseneaza();
+}
+
+function redeseneaza() {
+  if (!ultimeleDate) return;
+  const trecut = (performance.now() - tUltimeleDate) / 1000;
+  const d = ultimeleDate;
+  const now = d.server_time + trecut;
+  const prag = d.fresh_for || 90;
+
+  // Alertele active si nodurile lor, recalculate acum, nu la momentul mesajului.
+  const active = alertList.filter(a => now - a.ts <= ALERT_ACTIVE);
+  const inAlerta = new Set(active.flatMap(a => a.node_ids));
+
+  const nodes = d.nodes.map(n => {
+    const age = n.age === null ? null : n.age + trecut;
+    // Procentele evenimentului raman cat coboara varful, apoi revin la cele
+    // din ultimul heartbeat (aceeasi regula ca proc_afisat din app.py).
+    let proc = n.proc;
+    if (n.base_proc !== undefined) {
+      const evProaspat = n.ev_proc && n.ev_age !== null &&
+        n.ev_age + trecut <= (ANIM.event_proc_s || 3.6);
+      proc = evProaspat ? n.ev_proc : n.base_proc;
+    }
+    return { ...n, age, proc,
+      online: age !== null && age <= OFFLINE_AFTER,
+      fresh: age !== null && age <= prag,
+      alert: inAlerta.has(n.id) };
+  });
+  const online = nodes.filter(n => n.online).length;
+  const latest = active.length ? active.reduce((a, b) => (b.ts > a.ts ? b : a)) : null;
+
+  // Varful pe clasa peste nodurile proaspete, ca proc_max din app.py, dar
+  // recalculat acum, ca sa urmeze procentele de mai sus.
+  const cuProc = nodes.filter(n => n.fresh && n.proc).map(n => n.proc);
+  const procMax = cuProc.length
+    ? cuProc[0].map((_, k) => Math.max(...cuProc.map(v => v[k]))) : null;
+
+  render({ ...d, nodes, server_time: now,
+    summary: { ...d.summary, online, total: nodes.length,
+               active_alerts: active.length,
+               latest_alert: latest || d.summary.latest_alert,
+               proc_max: procMax } });
 }
 
 function render(data) {
   const s = data.summary;
   const now = data.server_time;
 
+  // Media si maximul de nivel le scrie cadruLive, din nivelurile live.
   document.getElementById('s-online').textContent = `${s.online}/${s.total}`;
-  document.getElementById('s-avg').textContent = s.avg_level !== null ? s.avg_level + '%' : '–';
-  document.getElementById('s-max').textContent = s.max_level !== null ? s.max_level + '%' : '–';
   const sa = document.getElementById('s-alerts');
   sa.textContent = s.active_alerts;
   sa.classList.toggle('hot', s.active_alerts > 0);
@@ -816,6 +987,7 @@ function render(data) {
     }
   }
   data.nodes.forEach(n => {
+    if (live[n.id]) { live[n.id].online = n.online; live[n.id].alert = !!n.alert; }
     if (!cards[n.id]) cards[n.id] = makeCard(n);
     updateCard(cards[n.id], n);
     list.appendChild(cards[n.id].el);   // pastreaza ordinea; nu recreeaza elementul
@@ -859,9 +1031,11 @@ function renderAlertHistory() {
 
 // ---------- markere ----------
 
+// Partea care se schimba o data cu datele: conturul de alerta, tooltip-ul,
+// clicul. Culoarea si marimea le actualizeaza actualizeazaMarker, din cadruLive.
 function drawMarker(n) {
-  const color = levelColor(n.online ? n.level : null);
-  const radius = n.online ? 9 + n.level * 0.22 : 7;
+  const V = live[n.id];
+  const lvlLive = V && V.cur !== null && n.online ? clampLevel(V.cur) : null;
 
   if (!markers[n.id]) {
     markers[n.id] = {
@@ -874,11 +1048,10 @@ function drawMarker(n) {
 
   const m = markers[n.id];
   m.circle.setStyle(n.alert
-    ? { color: '#D33049', weight: 4, fillColor: color, fillOpacity: 0.92 }
-    : { color: '#0D1A1E', weight: 2, fillColor: color, fillOpacity: 0.92 });
-  m.circle.setRadius(radius);
+    ? { color: '#D33049', weight: 4, fillOpacity: 0.92 }
+    : { color: '#0D1A1E', weight: 2, fillOpacity: 0.92 });
   const tip = `<b>${esc(n.name)}</b>${n.alert ? ' · ALERTA' : ''}<br>` +
-    `${n.online ? n.db.toFixed(1) + ' dB · ' + n.level + '%' : 'offline'}`;
+    `${lvlLive !== null ? V.cur.toFixed(1) + ' dB · ' + Math.round(lvlLive) + '%' : 'offline'}`;
   if (m.circle.getTooltip()) m.circle.setTooltipContent(tip);
   else m.circle.bindTooltip(tip, { direction: 'top' });
   m.circle.off('click').on('click', () => selectNode(n.id));
@@ -886,11 +1059,22 @@ function drawMarker(n) {
   const haloEl = m.halo.getElement();
   if (haloEl) haloEl.classList.toggle('halo-alert', !!n.alert);
 
-  if (n.alert) {
+  actualizeazaMarker(n.id, V || { alert: !!n.alert }, lvlLive);
+}
+
+// Culoarea si marimea markerului dupa nivelul live (lvl = null: offline).
+function actualizeazaMarker(id, V, lvl) {
+  const m = markers[id];
+  if (!m) return;
+  const color = levelColor(lvl);
+  const radius = lvl !== null ? 9 + lvl * 0.22 : 7;
+  m.circle.setStyle({ fillColor: color });
+  m.circle.setRadius(radius);
+  if (V.alert) {
     m.halo.setStyle({ fillColor: '#D33049', fillOpacity: 0.6 });
     m.halo.setRadius(Math.max(radius, 14));
   } else {
-    m.halo.setStyle({ fillColor: color, fillOpacity: n.online && n.level > 55 ? 0.5 : 0 });
+    m.halo.setStyle({ fillColor: color, fillOpacity: lvl !== null && lvl > 55 ? 0.5 : 0 });
     m.halo.setRadius(radius);
   }
 }
@@ -985,30 +1169,52 @@ async function loadHistory(nodeId) {
 
 // ---------- bucla ----------
 
-let tAlerte = 0;
+// 1. Fluxul live. Serverul trimite starea completa (cu ultimele alerte)
+//    imediat ce intra o citire sau o alerta.
+let flux = null;
+let fluxViu = false;
 
-async function refresh() {
-  try {
-    // Alertele se cer mai rar decat starea: lista se schimba de cateva ori pe
-    // ora, starea la fiecare heartbeat. Pe un Pi care tine si Flask-ul si
-    // bridge-ul, doua cereri pe secunda in loc de patru se simt.
-    const acum = Date.now();
-    const cerAlerte = acum - tAlerte >= PAS_ALERTE_MS;
-    if (cerAlerte) tAlerte = acum;
-
-    const [st, al] = await Promise.all([
-      fetch('/api/state').then(r => r.json()),
-      cerAlerte ? fetch('/api/alerts?limit=10').then(r => r.json()) : null
-    ]);
-    if (al) alertList = al.alerts;
-    render(st);
-  } catch (e) {
-    document.getElementById('s-online').textContent = '!';
-  }
+function pornesteFlux() {
+  if (!window.EventSource) return;           // browser foarte vechi: raman cererile
+  flux = new EventSource('/api/stream');
+  flux.onmessage = ev => {
+    fluxViu = true;
+    try { primeste(JSON.parse(ev.data)); } catch (e) { /* mesaj stricat: il sarim */ }
+  };
+  flux.onerror = () => {
+    fluxViu = false;
+    // Daca serverul a raspuns cu eroare (503 = prea multe fluxuri, 401 =
+    // sesiune expirata), browserul nu mai reincearca singur. Reincercam noi,
+    // mai rar; pana atunci merg cererile o data pe secunda.
+    if (flux.readyState === EventSource.CLOSED) {
+      flux = null;
+      setTimeout(pornesteFlux, REINCERC_FLUX_MS);
+    }
+  };
 }
 
-refresh();
-setInterval(refresh, PAS_STARE_MS);
+// 2. Cereri periodice: plasa de siguranta cand fluxul merge, sursa principala
+//    cand nu merge.
+async function cere() {
+  try {
+    const [st, al] = await Promise.all([
+      fetch('/api/state').then(r => r.json()),
+      fetch('/api/alerts?limit=10').then(r => r.json())
+    ]);
+    st.alerts = al.alerts;
+    primeste(st);
+  } catch (e) {
+    if (!fluxViu) document.getElementById('s-online').textContent = '!';
+  }
+  setTimeout(cere, fluxViu ? PAS_CU_FLUX_MS : PAS_FARA_FLUX_MS);
+}
+
+// 3. Redesenare o data pe secunda din ultimele date: ceasul, varstele,
+//    expirarea alertelor, graficul.
+setInterval(redeseneaza, 1000);
+
+cere();
+pornesteFlux();
 </script>
 </body>
 </html>
