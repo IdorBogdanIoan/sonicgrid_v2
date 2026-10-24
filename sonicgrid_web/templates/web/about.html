@@ -1,0 +1,10 @@
+{% extends "web/base.html" %}
+{% block title %}Despre · SonicGrid{% endblock %}
+{% block content %}
+<article class="doc">
+<h1>Despre {{ legal.project }}</h1>
+<p>{{ legal.project }} este o rețea distribuită de senzori acustici cu consum redus, dezvoltată ca proiect de cercetare în cadrul {{ legal.operator }}, sub coordonarea {{ legal.coordinator }}.</p>
+<p>Fiecare nod analizează sunetul local și trimite serverului doar nivelul sonor și, la nevoie, o alertă. Sistemul nu folosește camere și nu stochează conversații. Detalii în <a href="{{ url_for('web.privacy') }}">Politica de confidențialitate</a>.</p>
+<p>Contact: <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a></p>
+</article>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "web/base.html" %}
+{% block title %}Termeni de utilizare · SonicGrid{% endblock %}
+{% block content %}
+<article class="doc">
+<h1>Termeni de utilizare</h1>
+<p class="meta">Versiunea {{ legal.TERMS_VERSION }} · ultima actualizare: {{ legal.last_updated }}</p>
+
+<h2>1. Cine suntem</h2>
+<p>{{ legal.project }} este un proiect de cercetare academică pentru monitorizare acustică distribuită, derulat în cadrul {{ legal.operator }}, sub coordonarea {{ legal.coordinator }}. Platforma (denumită în continuare „Serviciul”) afișează nivelurile acustice și alertele generate de senzorii instalați în {{ legal.location }}.</p>
+
+<h2>2. Acceptarea termenilor</h2>
+<p>Prin autentificare confirmi că ai citit, ai înțeles și accepți acești Termeni și <a href="{{ url_for('web.privacy') }}">Politica de confidențialitate</a>. Dacă nu ești de acord, nu folosi Serviciul. Acceptarea ta (versiunea și data) se înregistrează.</p>
+
+<h2>3. Cine poate folosi Serviciul</h2>
+<p>Serviciul nu este public. Accesul este permis doar persoanelor cărora operatorul le-a creat un cont (membri ai echipei, coordonatori, personal autorizat). Conturile sunt personale și netransmisibile. Ești responsabil de păstrarea confidențialității parolei și trebuie să ne anunți imediat la {{ legal.contact_email }} dacă bănuiești că un cont a fost compromis.</p>
+
+<h2>4. Utilizare permisă</h2>
+<p>Poți folosi Serviciul exclusiv în scopul proiectului: cercetare, testare, demonstrații și monitorizarea siguranței în zona acoperită. Este interzis:</p>
+<ul>
+<li>să încerci să identifici, să urmărești sau să profilezi persoane pe baza datelor afișate;</li>
+<li>să copiezi, să publici sau să transmiți terților date din platformă fără acordul coordonatorului;</li>
+<li>să accesezi sau să încerci să accesezi zone, conturi sau date pentru care nu ai autorizație;</li>
+<li>să perturbi funcționarea Serviciului, a senzorilor sau a rețelei (inclusiv prin scanare, trafic excesiv sau date falsificate);</li>
+<li>să folosești Serviciul în scopuri ilegale sau contrare regulamentelor universității.</li>
+</ul>
+<p>Încălcarea acestor reguli duce la suspendarea imediată a contului și poate fi raportată autorităților competente. Accesul neautorizat la un sistem informatic este infracțiune conform art. 360 din Codul penal.</p>
+
+<h2>5. Natura datelor și a alertelor</h2>
+<p>Serviciul este un <strong>prototip experimental</strong>. Alertele sunt generate automat de un model statistic și pot fi greșite (alarme false sau evenimente nedetectate). Serviciul <strong>nu este un sistem de urgență</strong> și nu înlocuiește serviciile de pază, sistemele de siguranță certificate sau apelul la <strong>112</strong>. Nicio decizie cu efect asupra unei persoane nu trebuie luată doar pe baza unei alerte, fără verificare umană.</p>
+
+<h2>6. Disponibilitate</h2>
+<p>Serviciul este oferit „ca atare” și „în funcție de disponibilitate”, fără nicio garanție de funcționare neîntreruptă, exactitate sau adecvare pentru un anumit scop. Putem modifica, suspenda sau opri Serviciul oricând, inclusiv pentru mentenanță sau la încheierea proiectului.</p>
+
+<h2>7. Limitarea răspunderii</h2>
+<p>În limita maximă permisă de lege, operatorul și membrii echipei nu răspund pentru prejudicii indirecte sau pentru pierderi rezultate din folosirea sau imposibilitatea de a folosi Serviciul, ori din decizii luate pe baza datelor afișate. Nimic din acești termeni nu limitează răspunderea care nu poate fi exclusă prin lege (de exemplu pentru dol sau culpă gravă).</p>
+
+<h2>8. Proprietate intelectuală</h2>
+<p>Codul, modelele, designul și documentația Serviciului aparțin autorilor proiectului și/sau universității, conform regulamentelor aplicabile. Folosirea Serviciului nu îți transferă niciun drept asupra acestora.</p>
+
+<h2>9. Date personale</h2>
+<p>Modul în care prelucrăm datele este descris în <a href="{{ url_for('web.privacy') }}">Politica de confidențialitate</a>, care face parte din acești Termeni.</p>
+
+<h2>10. Modificări</h2>
+<p>Putem actualiza acești Termeni. La modificări importante crește numărul versiunii și ți se va cere să îi accepți din nou la următoarea autentificare.</p>
+
+<h2>11. Legea aplicabilă</h2>
+<p>Acești Termeni sunt guvernați de legea română. Eventualele dispute se soluționează pe cale amiabilă sau, în lipsă, de instanțele competente din București.</p>
+
+<h2>12. Contact</h2>
+<p>{{ legal.operator }}, {{ legal.operator_address }} · <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a></p>
+</article>
+{% endblock %}
